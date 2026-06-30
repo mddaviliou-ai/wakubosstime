@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Waku野王重生紀錄</title>
+  <title>Waku野王重生計時器</title>
   
   <!-- 引入 Tailwind CSS 樣式 -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -37,7 +37,7 @@
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInAnonymously } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where, getDoc } from 'firebase/firestore';
-    import { Clock, History, Activity, Plus, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save } from 'lucide-react';
+    import { Clock, History, Activity, Plus, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Target } from 'lucide-react';
 
     // ==========================================
     // 1. Firebase 初始化設定
@@ -144,8 +144,9 @@
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-gray-800 p-8 rounded-3xl shadow-2xl border border-gray-700 w-full max-w-md animate-in zoom-in-95 duration-300">
             <div className="flex flex-col items-center mb-8">
-              <div className="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-4 border border-blue-500/30">
-                <ShieldAlert className="w-8 h-8 text-blue-400" />
+              <div className="relative w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center mb-4 border border-red-500/30 overflow-hidden shadow-lg shadow-red-900/20">
+                <Target className="w-10 h-10 text-red-500/50 absolute" />
+                <Skull className="w-6 h-6 text-red-400 z-10" />
               </div>
               <h1 className="text-2xl font-bold text-white tracking-wide">野王重生計時器</h1>
               <p className="text-gray-400 mt-2">{isLogin ? '登入以繼續使用' : '註冊新帳號'}</p>
@@ -223,6 +224,7 @@
       
       // UI 狀態
       const [activeModalBossId, setActiveModalBossId] = useState(null); // 控制彈出視窗顯示的 BOSS
+      const [modalChannelInput, setModalChannelInput] = useState(''); // Modal 內的快速登記分流
       const [adminTab, setAdminTab] = useState('home'); // 'home' | 'boss' | 'users'
       const [showPwdModal, setShowPwdModal] = useState(false);
       const [newPwd, setNewPwd] = useState('');
@@ -254,6 +256,11 @@
         const timerInterval = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(timerInterval);
       }, []);
+
+      // 清空 Modal 內的分流輸入框
+      useEffect(() => {
+        if (!activeModalBossId) setModalChannelInput('');
+      }, [activeModalBossId]);
 
       // --- 資料庫監聽 ---
       useEffect(() => {
@@ -539,6 +546,23 @@
         } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
       };
 
+      // --- Modal 內的快速登記 ---
+      const handleModalQuickAdd = async (template) => {
+        if (!modalChannelInput.trim()) return;
+        try {
+          setIsReporting(true);
+          const activeBossId = `${template.id}_${modalChannelInput.trim()}`.replace(/[^a-zA-Z0-9_]/g, '_');
+          const killTime = Date.now();
+          const minCD = template.minCooldown || template.cooldownMinutes || 60;
+          const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
+          await setDoc(doc(db, 'activeBosses', activeBossId), {
+            templateId: template.id, bossName: template.name, channel: modalChannelInput.trim(), cooldownMinutes: minCD, maxCooldown: maxCD, lastKilled: killTime, nextSpawn: killTime + (minCD * 60 * 1000), maxSpawn: killTime + (maxCD * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username
+          });
+          setModalChannelInput('');
+          showMessage(`已成功回報 ${template.name} (${modalChannelInput.trim()}頻)`, "success");
+        } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
+      };
+
       const handleQuickReportKill = async (active) => {
         try {
           const template = templateMap[active.templateId];
@@ -586,7 +610,7 @@
       return (
         <div className="p-4 md:p-8 font-sans">
           
-          {/* 修改密碼 Modal - 優化：移除 backdrop-blur-sm */}
+          {/* 修改密碼 Modal */}
           {showPwdModal && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-in fade-in">
               <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700 w-full max-w-sm shadow-2xl">
@@ -603,7 +627,7 @@
             </div>
           )}
 
-          {/* BOSS 詳細資訊 Modal - 優化：移除 backdrop-blur-sm 避免每秒重繪造成嚴重卡頓 */}
+          {/* BOSS 詳細資訊 Modal */}
           {activeModalBossId && (() => {
             const group = displayBosses.find(g => g.id === activeModalBossId);
             if (!group) {
@@ -626,10 +650,14 @@
                       <div className={`flex shrink-0 w-12 h-12 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${earliestState === 'spawned' ? 'border-green-500/40' : earliestState === 'floating' ? 'border-yellow-500/40' : warningCount > 0 ? 'border-red-500/40' : 'border-gray-700'}`}>
                         {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${earliestState === 'spawned' ? 'text-green-400' : earliestState === 'floating' ? 'text-yellow-400' : warningCount > 0 ? 'text-red-400' : 'text-gray-500'}`} />}
                       </div>
-                      <div>
-                        <h3 className="text-lg sm:text-xl font-bold text-white flex items-center flex-wrap gap-2">
-                          {group.name} {group.level && <span className="text-yellow-400 text-sm sm:text-base">Lv.{group.level}</span>}
-                        </h3>
+                      <div className="flex flex-col">
+                        <div className="flex items-center flex-wrap gap-2">
+                          <h3 className="text-lg sm:text-xl font-bold text-white">{group.name}</h3>
+                          {group.level && <span className="text-yellow-400 text-sm sm:text-base font-bold">Lv.{group.level}</span>}
+                          <span className="text-[11px] sm:text-xs text-gray-400 bg-gray-900 px-2 py-0.5 rounded border border-gray-700 font-medium whitespace-nowrap ml-0.5">
+                            CD: {group.minCooldown || group.cooldownMinutes}{group.maxCooldown && group.maxCooldown !== (group.minCooldown || group.cooldownMinutes) ? `~${group.maxCooldown}` : ''}分
+                          </span>
+                        </div>
                         <div className="text-sm mt-1 flex items-center gap-1.5 sm:gap-2">
                           <span className="text-gray-400">{earliestState === 'waiting' ? '最快重生:' : '狀態:'}</span>
                           <span className={`font-mono ${earliestState === 'spawned' ? 'text-green-400 font-bold drop-shadow-[0_0_5px_rgba(74,222,128,0.3)]' : earliestState === 'floating' ? 'text-yellow-400 font-bold drop-shadow-[0_0_5px_rgba(250,204,21,0.3)]' : 'text-red-400'}`}>
@@ -645,6 +673,18 @@
 
                   {/* Modal Body (分流列表) */}
                   <div className="p-4 sm:p-5 overflow-y-auto flex flex-col gap-3">
+                    
+                    {/* 快速登記區塊 */}
+                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className="flex items-center gap-2 bg-gray-900/60 p-2 sm:p-3 rounded-xl border border-gray-700/80 shrink-0">
+                      <div className="flex-1 relative">
+                        <MapPin className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input type="text" value={modalChannelInput} onChange={e => setModalChannelInput(e.target.value)} placeholder="輸入分流快速登記 (例: 3)" className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-9 pr-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
+                      </div>
+                      <button type="submit" disabled={isReporting || !modalChannelInput.trim()} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors shrink-0 disabled:opacity-50">
+                        登記
+                      </button>
+                    </form>
+
                     {/* 全伺服器狀態條 */}
                     {group.effectiveGlobalSpawn !== null && (() => {
                       const { text: globalText, state: globalState } = formatCountdown(group.effectiveGlobalSpawn, group.effectiveGlobalMaxSpawn);
@@ -670,7 +710,7 @@
 
                     {/* 玩家回報的分流 */}
                     {group.channels.length === 0 && group.effectiveGlobalSpawn === null && (
-                      <p className="text-gray-500 text-center py-4">目前沒有任何分流紀錄</p>
+                      <p className="text-gray-500 text-center py-4 text-sm">目前沒有任何分流紀錄</p>
                     )}
                     {group.channels.map(active => {
                       const { text: timeText, state } = formatCountdown(active.nextSpawn, active.maxSpawn);
@@ -706,14 +746,24 @@
                                 <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-bold transition-colors">擊殺</button>
                                 <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className="px-3 py-1.5 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded-lg text-sm font-bold transition-colors">無王</button>
                               </div>
+                            ) : isFloating ? (
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] mr-1 hidden sm:inline text-sm">
+                                  {timeText}
+                                </span>
+                                <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] sm:hidden block text-[11px] max-w-[85px] truncate mr-1" title={timeText}>
+                                  {timeText.replace('可能重生 ~ ', '~')}
+                                </span>
+                                <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-bold transition-colors">擊殺</button>
+                              </div>
                             ) : (
-                              <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${isFloating ? 'text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)]' : isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                              <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
                                 {timeText}
                               </span>
                             )}
 
                             {canDelete && !isSpawned && (
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1.5 rounded-lg transition-colors border border-transparent ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1.5 rounded-lg transition-colors border border-transparent ml-1 ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             )}
@@ -731,8 +781,9 @@
             
             <header className="flex flex-col md:flex-row md:items-center justify-between bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700 gap-4">
               <div className="flex items-center gap-4">
-                <div className="p-3 bg-blue-500/20 rounded-xl">
-                  <ShieldAlert className="w-8 h-8 text-blue-400" />
+                <div className="relative w-14 h-14 bg-red-500/10 rounded-xl flex items-center justify-center border border-red-500/30 overflow-hidden shadow-lg shadow-red-900/20 shrink-0">
+                  <Target className="w-8 h-8 text-red-500/50 absolute" />
+                  <Skull className="w-5 h-5 text-red-400 z-10" />
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-white tracking-wide">野王重生計時器</h1>
