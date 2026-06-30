@@ -224,6 +224,7 @@
       
       // UI 狀態
       const [activeModalBossId, setActiveModalBossId] = useState(null); // 控制彈出視窗顯示的 BOSS
+      const [modalPage, setModalPage] = useState(1); // 彈出視窗的分流列表分頁
       const [modalChannelInput, setModalChannelInput] = useState(''); // Modal 內的快速登記分流
       const [adminTab, setAdminTab] = useState('home'); // 'home' | 'boss' | 'users'
       const [showPwdModal, setShowPwdModal] = useState(false);
@@ -257,9 +258,12 @@
         return () => clearInterval(timerInterval);
       }, []);
 
-      // 清空 Modal 內的分流輸入框
+      // 清空 Modal 內的分流輸入框與重置頁碼
       useEffect(() => {
-        if (!activeModalBossId) setModalChannelInput('');
+        if (!activeModalBossId) {
+          setModalChannelInput('');
+          setModalPage(1);
+        }
       }, [activeModalBossId]);
 
       // --- 資料庫監聽 ---
@@ -712,65 +716,84 @@
                     {group.channels.length === 0 && group.effectiveGlobalSpawn === null && (
                       <p className="text-gray-500 text-center py-4 text-sm">目前沒有任何分流紀錄</p>
                     )}
-                    {group.channels.map(active => {
-                      const { text: timeText, state } = formatCountdown(active.nextSpawn, active.maxSpawn);
-                      const isWarning = state === 'waiting' && (active.nextSpawn - now) <= 10 * 60 * 1000;
-                      const isFloating = state === 'floating';
-                      const isSpawned = state === 'spawned';
-                      
-                      // 判斷是否可以刪除: 管理員 或 是自己回報的
-                      const canDelete = isAdmin || active.reportedBy === appUser.id;
-                      
-                      return (
-                        <div key={active.id} className={`flex items-center justify-between p-3 rounded-xl border relative transition-all duration-300 overflow-hidden ${isSpawned ? 'bg-green-500/10 border-green-500/30' : isFloating ? 'bg-yellow-500/10 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-gray-800 border-gray-700'}`}>
-                          {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
-                          
-                          <div className="flex items-center gap-3 relative z-10">
-                            <div className={`flex flex-col items-center justify-center border rounded-lg px-3 py-1 min-w-[4rem] ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : 'bg-gray-900 border-gray-600'}`}>
-                              <span className={`text-[10px] ${isSpawned ? 'text-green-300' : isFloating ? 'text-yellow-300' : isWarning ? 'text-red-300' : 'text-gray-500'}`}>CH</span>
-                              <span className={`font-bold text-lg leading-tight ${isSpawned ? 'text-green-400' : isFloating ? 'text-yellow-400' : isWarning ? 'text-red-400' : 'text-blue-400'}`}>{active.channel}</span>
-                            </div>
-                            <div className="text-xs text-gray-400 flex flex-col gap-1">
-                              <span className="flex items-center gap-1 text-gray-300">
-                                <History className="w-3.5 h-3.5"/> 
-                                {new Date(active.lastKilled).toLocaleTimeString('zh-TW', { hour12: false })}
-                                <span className="text-blue-300/80 ml-1.5 font-medium truncate max-w-[80px] sm:max-w-none" title={active.reporterName}>({active.reporterName || '未知'})</span>
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3 relative z-10">
-                            {isWarning && <Flame className="w-5 h-5 text-red-500 animate-bounce" />}
-                            
-                            {isSpawned ? (
-                              <div className="flex items-center gap-2">
-                                <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-bold transition-colors">擊殺</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className="px-3 py-1.5 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded-lg text-sm font-bold transition-colors">無王</button>
-                              </div>
-                            ) : isFloating ? (
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] mr-1 hidden sm:inline text-sm">
-                                  {timeText}
-                                </span>
-                                <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] sm:hidden block text-[11px] max-w-[85px] truncate mr-1" title={timeText}>
-                                  {timeText.replace('可能重生 ~ ', '~')}
-                                </span>
-                                <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-bold transition-colors">擊殺</button>
-                              </div>
-                            ) : (
-                              <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
-                                {timeText}
-                              </span>
-                            )}
+                    {group.channels.length > 0 && (() => {
+                      const sortedChannels = [...group.channels].sort((a, b) => a.nextSpawn - b.nextSpawn);
+                      const itemsPerPage = 10;
+                      const totalPages = Math.max(1, Math.ceil(sortedChannels.length / itemsPerPage));
+                      const safePage = Math.min(modalPage, totalPages);
+                      const paginatedChannels = sortedChannels.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
 
-                            {canDelete && !isSpawned && (
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1.5 rounded-lg transition-colors border border-transparent ml-1 ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                      return (
+                        <>
+                          {paginatedChannels.map(active => {
+                            const { text: timeText, state } = formatCountdown(active.nextSpawn, active.maxSpawn);
+                            const isWarning = state === 'waiting' && (active.nextSpawn - now) <= 10 * 60 * 1000;
+                            const isFloating = state === 'floating';
+                            const isSpawned = state === 'spawned';
+                            
+                            // 判斷是否可以刪除: 管理員 或 是自己回報的
+                            const canDelete = isAdmin || active.reportedBy === appUser.id;
+                            
+                            return (
+                              <div key={active.id} className={`flex items-center justify-between p-3 rounded-xl border relative transition-all duration-300 overflow-hidden ${isSpawned ? 'bg-green-500/10 border-green-500/30' : isFloating ? 'bg-yellow-500/10 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-gray-800 border-gray-700'}`}>
+                                {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
+                                
+                                <div className="flex items-center gap-3 relative z-10">
+                                  <div className={`flex items-center justify-center border rounded-lg px-3 py-1.5 min-w-[5rem] ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : 'bg-gray-900 border-gray-600'}`}>
+                                    <span className={`font-bold text-sm sm:text-base leading-tight ${isSpawned ? 'text-green-400' : isFloating ? 'text-yellow-400' : isWarning ? 'text-red-400' : 'text-blue-400'}`}>CH.{active.channel}</span>
+                                  </div>
+                                  <div className="text-xs text-gray-400 flex flex-col gap-1">
+                                    <span className="flex items-center gap-1 text-gray-300">
+                                      <History className="w-3.5 h-3.5"/> 
+                                      {new Date(active.lastKilled).toLocaleTimeString('zh-TW', { hour12: false })}
+                                      <span className="text-blue-300/80 ml-1.5 font-medium truncate max-w-[80px] sm:max-w-none" title={active.reporterName}>({active.reporterName || '未知'})</span>
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3 relative z-10">
+                                  {isWarning && <Flame className="w-5 h-5 text-red-500 animate-bounce" />}
+                                  
+                                  {isSpawned ? (
+                                    <div className="flex items-center gap-2">
+                                      <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-bold transition-colors">擊殺</button>
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className="px-3 py-1.5 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded-lg text-sm font-bold transition-colors">無王</button>
+                                    </div>
+                                  ) : isFloating ? (
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] mr-1 hidden sm:inline text-sm">
+                                        {timeText}
+                                      </span>
+                                      <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] sm:hidden block text-[11px] max-w-[85px] truncate mr-1" title={timeText}>
+                                        {timeText.replace('可能重生 ~ ', '~')}
+                                      </span>
+                                      <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-bold transition-colors">擊殺</button>
+                                    </div>
+                                  ) : (
+                                    <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                                      {timeText}
+                                    </span>
+                                  )}
+
+                                  {canDelete && !isSpawned && (
+                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1.5 rounded-lg transition-colors border border-transparent ml-1 ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          
+                          {totalPages > 1 && (
+                            <div className="flex justify-between items-center pt-3 mt-1 border-t border-gray-700/50">
+                              <button onClick={() => setModalPage(p => Math.max(1, p - 1))} disabled={safePage === 1} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded-lg text-sm transition-colors text-white font-medium">上一頁</button>
+                              <span className="text-gray-400 text-sm font-medium">第 {safePage} / {totalPages} 頁</span>
+                              <button onClick={() => setModalPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded-lg text-sm transition-colors text-white font-medium">下一頁</button>
+                            </div>
+                          )}
+                        </>
                       );
-                    })}
+                    })()}
                   </div>
                 </div>
               </div>
