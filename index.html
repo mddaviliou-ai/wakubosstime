@@ -605,7 +605,7 @@
         if (diffMin > 0) {
           return { text: `${formatTime(diffMin)}`, state: 'waiting' };
         } else if (diffMax > 0) {
-          return { text: `可能重生 ~ ${formatTime(diffMax)}`, state: 'floating' };
+          return { text: `${formatTime(diffMax)}`, state: 'floating' }; // 精簡：移除了 "可能重生 ~ "
         } else {
           return { text: '🟢 確定重生', state: 'spawned' }; 
         }
@@ -689,6 +689,18 @@
                       </button>
                     </form>
 
+                    {/* 狀態顏色說明 Legend */}
+                    <div className="flex flex-wrap items-center gap-4 bg-gray-900/40 p-2.5 rounded-xl border border-gray-700/50 shrink-0 mb-1">
+                      <div className="flex items-center gap-2 text-xs text-red-400 font-medium">
+                        <div className="w-2.5 h-2.5 rounded-[3px] bg-red-900/80 border border-red-500/50"></div>
+                        預估10分鐘重生
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-yellow-400 font-medium">
+                        <div className="w-2.5 h-2.5 rounded-[3px] bg-yellow-900/80 border border-yellow-500/50"></div>
+                        時間內可能重生
+                      </div>
+                    </div>
+
                     {/* 全伺服器狀態條 */}
                     {group.effectiveGlobalSpawn !== null && (() => {
                       const { text: globalText, state: globalState } = formatCountdown(group.effectiveGlobalSpawn, group.effectiveGlobalMaxSpawn);
@@ -760,11 +772,8 @@
                                     </div>
                                   ) : isFloating ? (
                                     <div className="flex items-center gap-2">
-                                      <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] mr-1 hidden sm:inline text-sm">
+                                      <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] mr-1 text-sm sm:text-base">
                                         {timeText}
-                                      </span>
-                                      <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] sm:hidden block text-[11px] max-w-[85px] truncate mr-1" title={timeText}>
-                                        {timeText.replace('可能重生 ~ ', '~')}
                                       </span>
                                       <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm font-bold transition-colors">擊殺</button>
                                     </div>
@@ -998,10 +1007,16 @@
                 <section className="space-y-4 animate-in fade-in duration-300">
                   {/* 玩家視角 BOSS 列表 Header 排序 */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2">
-                    <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2">
-                      <Clock className="w-6 h-6 text-yellow-500" />
-                      各頻道 BOSS 狀態
-                    </h2>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                      <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2">
+                        <Clock className="w-6 h-6 text-yellow-500" />
+                        各頻道 BOSS 狀態
+                      </h2>
+                      <div className="flex items-center gap-3 text-[11px] font-medium text-gray-400 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1">
+                        <span className="flex items-center gap-1 text-red-400"><div className="w-2 h-2 rounded bg-red-500/80"></div> 10分內重生</span>
+                        <span className="flex items-center gap-1 text-yellow-400"><div className="w-2 h-2 rounded bg-yellow-500/80"></div> 可能重生</span>
+                      </div>
+                    </div>
                     <select value={bossSort} onChange={e=>setBossSort(e.target.value)} className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full sm:w-auto">
                       <option value="earliest">預設排序 (快到慢)</option>
                       <option value="levelDesc">等級排序 (高到低)</option>
