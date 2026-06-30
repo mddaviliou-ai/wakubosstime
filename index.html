@@ -223,22 +223,31 @@
       
       // UI 狀態
       const [expandedBosses, setExpandedBosses] = useState({});
-      const [adminTab, setAdminTab] = useState('boss'); // 'boss' | 'users'
+      const [adminTab, setAdminTab] = useState('home'); // 'home' | 'boss' | 'users'
       const [showPwdModal, setShowPwdModal] = useState(false);
       const [newPwd, setNewPwd] = useState('');
       
+      // 排序狀態
+      const [bossSort, setBossSort] = useState('earliest'); // 'earliest', 'levelDesc', 'levelAsc'
+      const [adminSortOrder, setAdminSortOrder] = useState('levelDesc'); // 'name', 'levelDesc', 'levelAsc'
+      
       // 表單狀態
       const [newTemplateName, setNewTemplateName] = useState('');
-      const [newTemplateCooldown, setNewTemplateCooldown] = useState(60);
+      const [newTemplateLevel, setNewTemplateLevel] = useState('');
+      const [newTemplateMinCD, setNewTemplateMinCD] = useState(60);
+      const [newTemplateMaxCD, setNewTemplateMaxCD] = useState(60);
       const [newTemplateImage, setNewTemplateImage] = useState(null);
       const [isAddingTemplate, setIsAddingTemplate] = useState(false);
       const [editingTemplateId, setEditingTemplateId] = useState(null);
+      const [showBossForm, setShowBossForm] = useState(true);
+      const [showUserList, setShowUserList] = useState(true);
       
       const [searchQuery, setSearchQuery] = useState('');
       const [selectedTemplateId, setSelectedTemplateId] = useState('');
       const [channelInput, setChannelInput] = useState('');
       const [isReporting, setIsReporting] = useState(false);
       const [isResettingGlobal, setIsResettingGlobal] = useState(false);
+      const [globalBaseTime, setGlobalBaseTime] = useState(''); // 管理員自訂基準時間
 
       // --- 計時器 Setup ---
       useEffect(() => {
@@ -250,13 +259,11 @@
       useEffect(() => {
         const unsubscribeTemplates = onSnapshot(collection(db, 'bossTemplates'), (snapshot) => {
           const templatesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-          templatesData.sort((a, b) => a.name.localeCompare(b.name));
           setBossTemplates(templatesData);
         });
 
         const unsubscribeActive = onSnapshot(collection(db, 'activeBosses'), (snapshot) => {
           const activeData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-          activeData.sort((a, b) => (a.nextSpawn || 0) - (b.nextSpawn || 0));
           setActiveBosses(activeData);
         });
 
@@ -288,8 +295,23 @@
       }, [bossTemplates]);
 
       const filteredTemplates = useMemo(() => {
-        return bossTemplates.filter(t => t.name.toLowerCase().includes(searchQuery.toLowerCase()));
-      }, [bossTemplates, searchQuery]);
+        // 先依照搜尋條件過濾，再套用下拉式選單的排序方式給選擇列表
+        let result = bossTemplates.filter(t => t.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        return result.sort((a, b) => {
+           if (bossSort === 'levelDesc') return (b.level || 0) - (a.level || 0) || a.name.localeCompare(b.name);
+           if (bossSort === 'levelAsc') return (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name);
+           return a.name.localeCompare(b.name); // 搜尋列表預設照名稱
+        });
+      }, [bossTemplates, searchQuery, bossSort]);
+
+      // 管理員頁面的 BOSS 列表排序
+      const sortedAdminTemplates = useMemo(() => {
+        return [...bossTemplates].sort((a, b) => {
+            if (adminSortOrder === 'levelDesc') return (b.level || 0) - (a.level || 0) || a.name.localeCompare(b.name);
+            if (adminSortOrder === 'levelAsc') return (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name);
+            return a.name.localeCompare(b.name); // 預設名稱排序
+        });
+      }, [bossTemplates, adminSortOrder]);
 
       useEffect(() => {
         if (filteredTemplates.length > 0) {
@@ -318,8 +340,13 @@
           });
 
           return { ...template, channels, effectiveGlobalSpawn, earliestSpawn: earliest, shouldDisplay: channels.length > 0 || effectiveGlobalSpawn !== null };
-        }).filter(b => b.shouldDisplay).sort((a, b) => (a.earliestSpawn || 0) - (b.earliestSpawn || 0));
-      }, [bossTemplates, activeBosses, now]);
+        }).filter(b => b.shouldDisplay).sort((a, b) => {
+           // 套用玩家列表的排序設定
+           if (bossSort === 'levelDesc') return (b.level || 0) - (a.level || 0) || a.name.localeCompare(b.name);
+           if (bossSort === 'levelAsc') return (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name);
+           return (a.earliestSpawn || 0) - (b.earliestSpawn || 0); // 預設依最快重生排序
+        });
+      }, [bossTemplates, activeBosses, now, bossSort]);
 
       // --- 個人密碼修改 ---
       const handleChangePassword = async (e) => {
@@ -360,25 +387,50 @@
 
       const handleSaveTemplate = async (e) => {
         e.preventDefault();
-        if (!newTemplateName.trim() || newTemplateCooldown <= 0) return;
+        if (!newTemplateName.trim() || newTemplateMinCD <= 0) return;
+        const minCD = Number(newTemplateMinCD);
+        const maxCD = Number(newTemplateMaxCD) || minCD;
+        const level = newTemplateLevel ? Number(newTemplateLevel) : null;
+        if (maxCD < minCD) { showMessage("最大CD不能小於最小CD", "error"); return; }
+        
         try {
           setIsAddingTemplate(true);
+          const templateData = { 
+            name: newTemplateName.trim(), 
+            level: level,
+            minCooldown: minCD,
+            maxCooldown: maxCD,
+            cooldownMinutes: minCD, // 保留舊欄位以防萬一
+            imageUrl: newTemplateImage 
+          };
           if (editingTemplateId) {
-            await updateDoc(doc(db, 'bossTemplates', editingTemplateId), { name: newTemplateName.trim(), cooldownMinutes: Number(newTemplateCooldown), imageUrl: newTemplateImage });
+            await updateDoc(doc(db, 'bossTemplates', editingTemplateId), templateData);
             setEditingTemplateId(null);
             showMessage("種類修改成功", "success");
           } else {
-            await addDoc(collection(db, 'bossTemplates'), { name: newTemplateName.trim(), cooldownMinutes: Number(newTemplateCooldown), imageUrl: newTemplateImage, createdBy: appUser.id, createdAt: Date.now(), globalNextSpawn: null, globalIsAlive: false });
+            await addDoc(collection(db, 'bossTemplates'), { 
+              ...templateData,
+              createdBy: appUser.id, 
+              createdAt: Date.now(), 
+              globalNextSpawn: null, 
+              globalIsAlive: false 
+            });
             showMessage("種類新增成功", "success");
           }
-          setNewTemplateName(''); setNewTemplateCooldown(60); setNewTemplateImage(null);
+          setNewTemplateName(''); setNewTemplateLevel(''); setNewTemplateMinCD(60); setNewTemplateMaxCD(60); setNewTemplateImage(null);
         } catch (error) { showMessage("儲存失敗", "error"); } finally { setIsAddingTemplate(false); }
       };
 
-      const handleCancelEdit = () => { setEditingTemplateId(null); setNewTemplateName(''); setNewTemplateCooldown(60); setNewTemplateImage(null); };
+      const handleCancelEdit = () => { setEditingTemplateId(null); setNewTemplateName(''); setNewTemplateLevel(''); setNewTemplateMinCD(60); setNewTemplateMaxCD(60); setNewTemplateImage(null); };
 
       const handleEditClick = (template) => {
-        setEditingTemplateId(template.id); setNewTemplateName(template.name); setNewTemplateCooldown(template.cooldownMinutes); setNewTemplateImage(template.imageUrl || null);
+        setEditingTemplateId(template.id); 
+        setNewTemplateName(template.name); 
+        setNewTemplateLevel(template.level || '');
+        setNewTemplateMinCD(template.minCooldown || template.cooldownMinutes || 60);
+        setNewTemplateMaxCD(template.maxCooldown || template.cooldownMinutes || 60);
+        setNewTemplateImage(template.imageUrl || null);
+        setShowBossForm(true);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       };
 
@@ -387,19 +439,29 @@
         try { await deleteDoc(doc(db, 'bossTemplates', templateId)); showMessage("刪除成功", "success"); } catch (error) { showMessage("刪除失敗", "error"); }
       };
 
+      const handleDeleteActiveBoss = async (activeId) => {
+        if (!window.confirm("確定要手動刪除這筆分流計時紀錄嗎？")) return;
+        try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } catch(e) { showMessage("刪除失敗", "error"); }
+      };
+
       const handleResetAllBosses = async () => {
-        if (!window.confirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(通常用於伺服器剛維修開機後)")) return;
+        if (!window.confirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(將使用您輸入的基準時間計算)")) return;
         try {
           setIsResettingGlobal(true);
+          const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
           const activeSnap = await getDocs(collection(db, 'activeBosses'));
           await Promise.all(activeSnap.docs.map(d => deleteDoc(d.ref)));
-          await Promise.all(bossTemplates.map(t => updateDoc(doc(db, 'bossTemplates', t.id), { globalNextSpawn: Date.now() + (t.cooldownMinutes * 60 * 1000), globalIsAlive: false })));
+          await Promise.all(bossTemplates.map(t => updateDoc(doc(db, 'bossTemplates', t.id), { globalNextSpawn: baseTime + ((t.minCooldown || t.cooldownMinutes) * 60 * 1000), globalIsAlive: false })));
           showMessage("全伺服器王重生時間已重置！", "success");
         } catch (error) { showMessage("全域重置失敗", "error"); } finally { setIsResettingGlobal(false); }
       };
 
       const handleGlobalResetSingle = async (template) => {
-        try { await updateDoc(doc(db, 'bossTemplates', template.id), { globalNextSpawn: Date.now() + (template.cooldownMinutes * 60 * 1000), globalIsAlive: false }); showMessage(`${template.name} 已開始全線倒數`, "success"); } catch (e) { showMessage("設定失敗", "error"); }
+        try {
+          const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
+          await updateDoc(doc(db, 'bossTemplates', template.id), { globalNextSpawn: baseTime + ((template.minCooldown || template.cooldownMinutes) * 60 * 1000), globalIsAlive: false }); 
+          showMessage(`${template.name} 已開始全線倒數`, "success"); 
+        } catch (e) { showMessage("設定失敗", "error"); }
       };
 
       const handleGlobalSpawnSingle = async (template) => {
@@ -459,8 +521,9 @@
           setIsReporting(true);
           const activeBossId = `${template.id}_${channelInput.trim()}`.replace(/[^a-zA-Z0-9_]/g, '_');
           const killTime = Date.now();
+          const cd = template.minCooldown || template.cooldownMinutes || 60;
           await setDoc(doc(db, 'activeBosses', activeBossId), {
-            templateId: template.id, bossName: template.name, channel: channelInput.trim(), cooldownMinutes: template.cooldownMinutes, lastKilled: killTime, nextSpawn: killTime + (template.cooldownMinutes * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username
+            templateId: template.id, bossName: template.name, channel: channelInput.trim(), cooldownMinutes: cd, lastKilled: killTime, nextSpawn: killTime + (cd * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username
           });
           setChannelInput(''); showMessage(`已成功回報 ${template.name} (${channelInput.trim()}頻)`, "success");
         } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
@@ -469,7 +532,7 @@
       const formatCountdown = (nextSpawnTime) => {
         if (!nextSpawnTime) return { text: '未知', isAlive: true };
         const diff = nextSpawnTime - now;
-        if (diff <= 0) return { text: '🟢 已重生 / 可擊殺', isAlive: true };
+        if (diff <= 0) return { text: '🟢 已重生', isAlive: true }; // 修改：只顯示 已重生
         const h = Math.floor(diff / (1000 * 60 * 60)), m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)), s = Math.floor((diff % (1000 * 60)) / 1000);
         const pad = (n) => String(n).padStart(2, '0');
         return { text: `🔴 剩餘: ${pad(h)}:${pad(m)}:${pad(s)}`, isAlive: false };
@@ -516,11 +579,14 @@
 
             {isAdmin && (
               <section className="bg-gray-800 p-6 rounded-2xl shadow-lg border border-purple-500/30 ring-1 ring-purple-500/20 animate-in fade-in duration-300">
-                <div className="flex items-center gap-2 mb-6 border-b border-gray-700 pb-4">
-                  <button onClick={() => setAdminTab('boss')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors ${adminTab === 'boss' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
+                <div className="flex items-center gap-2 mb-6 border-b border-gray-700 pb-4 overflow-x-auto">
+                  <button onClick={() => setAdminTab('home')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'home' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
+                    <MapPin className="w-4 h-4"/> 擊殺登記 / 狀態
+                  </button>
+                  <button onClick={() => setAdminTab('boss')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'boss' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
                     <Crosshair className="w-4 h-4"/> BOSS 管理
                   </button>
-                  <button onClick={() => setAdminTab('users')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors ${adminTab === 'users' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700 relative'}`}>
+                  <button onClick={() => setAdminTab('users')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'users' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700 relative'}`}>
                     <Users className="w-4 h-4"/> 會員管理
                     {allUsers.filter(u => u.status === 'pending').length > 0 && (
                       <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-gray-800"></span>
@@ -530,47 +596,89 @@
 
                 {adminTab === 'boss' ? (
                   <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-                      <h2 className="text-lg font-semibold flex items-center gap-2 text-purple-400">
-                        <UserCog className="w-5 h-5" />
-                        {editingTemplateId ? '編輯 BOSS 種類' : '設定 BOSS 種類與外觀'}
-                      </h2>
-                      <button onClick={handleResetAllBosses} disabled={isResettingGlobal} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors disabled:opacity-50">
-                        {isResettingGlobal ? <Activity className="w-4 h-4 animate-spin"/> : <RefreshCw className="w-4 h-4"/>} 維修重置 (重新計時所有王)
-                      </button>
+                    <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-6 gap-4">
+                      <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-700/50 p-2 -ml-2 rounded-lg transition-colors select-none" onClick={() => setShowBossForm(!showBossForm)}>
+                        <h2 className="text-lg font-semibold flex items-center gap-2 text-purple-400">
+                          <UserCog className="w-5 h-5" />
+                          {editingTemplateId ? '編輯 BOSS 種類' : '設定 BOSS 種類與外觀'}
+                        </h2>
+                        {showBossForm ? <ChevronUp className="w-5 h-5 text-purple-400" /> : <ChevronDown className="w-5 h-5 text-purple-400" />}
+                      </div>
+                      
+                      {/* 管理員維修更新時間輸入框 */}
+                      <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3">
+                        <div className="flex flex-col items-end">
+                           <label className="text-[11px] text-gray-400 mb-0.5">自訂基準時間 (維修重置用，留空為現在)</label>
+                           <input type="datetime-local" value={globalBaseTime} onChange={e=>setGlobalBaseTime(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-purple-500" />
+                        </div>
+                        <button onClick={handleResetAllBosses} disabled={isResettingGlobal} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 h-[38px] mt-1 sm:mt-0 w-full sm:w-auto">
+                          {isResettingGlobal ? <Activity className="w-4 h-4 animate-spin"/> : <RefreshCw className="w-4 h-4"/>} 全域重置
+                        </button>
+                      </div>
                     </div>
                     
-                    <form onSubmit={handleSaveTemplate} className="flex flex-col md:flex-row gap-4 mb-6 items-start bg-gray-900/50 p-4 rounded-xl border border-gray-700">
-                      <div className="shrink-0 flex flex-col items-center">
-                        <label className="block text-sm text-gray-400 mb-1 w-full text-left">外觀圖</label>
-                        <label className="flex items-center justify-center w-16 h-16 md:w-[76px] md:h-[76px] bg-gray-900 border border-gray-600 border-dashed rounded-xl cursor-pointer hover:border-purple-500 hover:bg-purple-500/10 transition-all overflow-hidden group">
-                          {newTemplateImage ? <img src={newTemplateImage} alt="Preview" className="w-full h-full object-cover" /> : <div className="text-gray-500 group-hover:text-purple-400 flex flex-col items-center"><Upload className="w-5 h-5 mb-0.5" /><span className="text-[10px]">上傳</span></div>}
-                          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                        </label>
-                      </div>
-                      <div className="flex-1 w-full">
-                        <label className="block text-sm text-gray-400 mb-1">BOSS 名稱</label>
-                        <input type="text" value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder="例如: 巴洛古" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all h-[52px]" required />
-                      </div>
-                      <div className="w-full md:w-32">
-                        <label className="block text-sm text-gray-400 mb-1">冷卻 (分鐘)</label>
-                        <input type="number" min="1" value={newTemplateCooldown} onChange={(e) => setNewTemplateCooldown(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all h-[52px]" required />
-                      </div>
-                      <div className="flex items-end w-full md:w-auto mt-2 md:mt-0 pt-0 md:pt-6 gap-2">
-                        <button type="submit" disabled={isAddingTemplate} className="w-full md:w-auto bg-purple-600 hover:bg-purple-500 text-white font-medium px-6 py-3 h-[52px] rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-900/20">
-                          {isAddingTemplate ? <Activity className="w-5 h-5 animate-spin" /> : (editingTemplateId ? '儲存修改' : '新增種類')}
-                        </button>
-                        {editingTemplateId && <button type="button" onClick={handleCancelEdit} className="w-full md:w-auto bg-gray-700 hover:bg-gray-600 text-white font-medium px-4 py-3 h-[52px] rounded-lg transition-colors flex items-center justify-center"><X className="w-5 h-5" /></button>}
-                      </div>
-                    </form>
+                    {showBossForm && (
+                      <form onSubmit={handleSaveTemplate} className="flex flex-col gap-4 mb-6 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+                        <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                          <div className="shrink-0 flex flex-col items-center">
+                            <label className="block text-sm text-gray-400 mb-1 w-full text-left">外觀圖</label>
+                            <label className="flex items-center justify-center w-16 h-16 md:w-[76px] md:h-[76px] bg-gray-900 border border-gray-600 border-dashed rounded-xl cursor-pointer hover:border-purple-500 hover:bg-purple-500/10 transition-all overflow-hidden group">
+                              {newTemplateImage ? <img src={newTemplateImage} alt="Preview" className="w-full h-full object-cover" /> : <div className="text-gray-500 group-hover:text-purple-400 flex flex-col items-center"><Upload className="w-5 h-5 mb-0.5" /><span className="text-[10px]">上傳</span></div>}
+                              <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                            </label>
+                          </div>
+                          
+                          <div className="flex-1 w-full grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="col-span-2 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">BOSS 名稱</label>
+                              <input type="text" value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder="例如: 巴洛古" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" required />
+                            </div>
+                            <div className="col-span-2 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">等級 (Lv)</label>
+                              <input type="number" min="1" value={newTemplateLevel} onChange={(e) => setNewTemplateLevel(e.target.value)} placeholder="例如: 80" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" />
+                            </div>
+                            <div className="col-span-1 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">最小CD(分)</label>
+                              <input type="number" min="1" value={newTemplateMinCD} onChange={(e) => setNewTemplateMinCD(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" required />
+                            </div>
+                            <div className="col-span-1 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">最大CD(分)</label>
+                              <input type="number" min="1" value={newTemplateMaxCD} onChange={(e) => setNewTemplateMaxCD(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" required />
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-end gap-2 border-t border-gray-800 pt-3">
+                          {editingTemplateId && <button type="button" onClick={handleCancelEdit} className="bg-gray-700 hover:bg-gray-600 text-white font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center">取消</button>}
+                          <button type="submit" disabled={isAddingTemplate} className="bg-purple-600 hover:bg-purple-500 text-white font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-900/20">
+                            {isAddingTemplate ? <Activity className="w-5 h-5 animate-spin" /> : (editingTemplateId ? '儲存修改' : '新增種類')}
+                          </button>
+                        </div>
+                      </form>
+                    )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t border-gray-700">
-                      {bossTemplates.map(template => (
+                    {/* 管理員 Boss 列表排序 */}
+                    <div className="flex justify-between items-center pt-4 border-t border-gray-700 mb-4">
+                       <h3 className="text-gray-300 font-bold ml-1">現有 BOSS ({bossTemplates.length})</h3>
+                       <select value={adminSortOrder} onChange={(e) => setAdminSortOrder(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500">
+                         <option value="name">依名稱排序</option>
+                         <option value="levelDesc">等級 (高到低)</option>
+                         <option value="levelAsc">等級 (低到高)</option>
+                       </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {sortedAdminTemplates.map(template => (
                         <div key={template.id} className="flex flex-col bg-gray-900 border border-gray-700 rounded-xl p-4 gap-3 relative hover:border-purple-500/50 transition-colors">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               {template.imageUrl ? <img src={template.imageUrl} alt={template.name} className="w-10 h-10 rounded-full object-cover border border-gray-700 bg-gray-800" /> : <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center border border-gray-700"><ImageIcon className="w-5 h-5 text-gray-500" /></div>}
-                              <div className="flex flex-col"><span className="font-bold text-gray-200">{template.name}</span><span className="text-gray-500 text-xs">CD: {template.cooldownMinutes}分鐘</span></div>
+                              <div className="flex flex-col">
+                                <span className="font-bold text-gray-200">
+                                  {template.name} {template.level && <span className="text-yellow-400 text-sm ml-1">Lv.{template.level}</span>}
+                                </span>
+                                <span className="text-gray-500 text-xs">CD: {template.minCooldown || template.cooldownMinutes}{template.maxCooldown && template.maxCooldown !== (template.minCooldown || template.cooldownMinutes) ? `~${template.maxCooldown}` : ''}分鐘</span>
+                              </div>
                             </div>
                             <div className="flex items-center gap-1">
                               <button onClick={() => handleEditClick(template)} className="text-gray-500 hover:text-blue-400 transition-colors p-1.5 rounded bg-gray-800 hover:bg-gray-700"><Edit2 className="w-4 h-4" /></button>
@@ -579,174 +687,200 @@
                           </div>
                           
                           <div className="flex items-center gap-2 pt-3 border-t border-gray-800">
-                            <button onClick={() => handleGlobalResetSingle(template)} className="flex-1 flex items-center justify-center gap-1 text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 px-2 py-1.5 rounded transition-colors"><RefreshCw className="w-3 h-3"/> 維修重置</button>
+                            <button onClick={() => handleGlobalResetSingle(template)} className="flex-1 flex items-center justify-center gap-1 text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 px-2 py-1.5 rounded transition-colors" title="套用上方自訂基準時間"><RefreshCw className="w-3 h-3"/> 維修重置</button>
                             <button onClick={() => handleGlobalSpawnSingle(template)} className="flex-1 flex items-center justify-center gap-1 text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 px-2 py-1.5 rounded transition-colors"><CheckCircle className="w-3 h-3"/> 標記重生</button>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                ) : (
+                ) : adminTab === 'users' ? (
                   <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-3">
-                     <h2 className="text-lg font-semibold flex items-center gap-2 text-purple-400 mb-4"><Users className="w-5 h-5" /> 系統註冊會員 ({allUsers.length})</h2>
-                     {allUsers.length === 0 ? (
-                       <p className="text-gray-500 text-center py-6">目前尚無其他會員。</p>
-                     ) : (
-                       allUsers.map(u => <AdminUserRow key={u.id} user={u} />)
+                     <div className="flex items-center justify-between cursor-pointer hover:bg-gray-700/50 p-2 -mx-2 rounded-lg transition-colors select-none mb-2" onClick={() => setShowUserList(!showUserList)}>
+                       <h2 className="text-lg font-semibold flex items-center gap-2 text-purple-400"><Users className="w-5 h-5" /> 系統註冊會員 ({allUsers.length})</h2>
+                       {showUserList ? <ChevronUp className="w-5 h-5 text-purple-400" /> : <ChevronDown className="w-5 h-5 text-purple-400" />}
+                     </div>
+                     
+                     {showUserList && (
+                       allUsers.length === 0 ? (
+                         <p className="text-gray-500 text-center py-6">目前尚無其他會員。</p>
+                       ) : (
+                         allUsers.map(u => <AdminUserRow key={u.id} user={u} />)
+                       )
                      )}
                   </div>
-                )}
+                ) : null}
               </section>
             )}
 
-            <section className="bg-gray-800 p-6 rounded-2xl shadow-lg border border-blue-500/30 relative z-10">
-              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-blue-400">
-                <Crosshair className="w-5 h-5" />
-                回報擊殺紀錄
-              </h2>
-              {bossTemplates.length === 0 ? (
-                <div className="text-center py-6 text-gray-400 bg-gray-900 rounded-lg border border-gray-700">
-                  系統目前尚未設定任何 BOSS 種類。
-                </div>
-              ) : (
-                <form onSubmit={handleReportKill} className="flex flex-col md:flex-row gap-4 items-end">
-                  <div className="w-full md:w-48">
-                    <label className="block text-sm text-gray-400 mb-1">搜尋王</label>
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="輸入關鍵字..." className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[52px]" />
+            {(!isAdmin || adminTab === 'home') && (
+              <>
+                <section className="bg-gray-800 p-6 rounded-2xl shadow-lg border border-blue-500/30 relative z-10 animate-in fade-in duration-300">
+                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-blue-400">
+                    <Crosshair className="w-5 h-5" />
+                    回報擊殺紀錄
+                  </h2>
+                  {bossTemplates.length === 0 ? (
+                    <div className="text-center py-6 text-gray-400 bg-gray-900 rounded-lg border border-gray-700">
+                      系統目前尚未設定任何 BOSS 種類。
                     </div>
-                  </div>
-                  <div className="flex-1 w-full">
-                    <label className="block text-sm text-gray-400 mb-1">選擇 BOSS 種類</label>
-                    <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[52px]" required>
-                      {filteredTemplates.length > 0 ? filteredTemplates.map(t => <option key={t.id} value={t.id}>{t.name} (CD: {t.cooldownMinutes}分)</option>) : <option value="">找不到符合的王</option>}
+                  ) : (
+                    <form onSubmit={handleReportKill} className="flex flex-col md:flex-row gap-4 items-end">
+                      <div className="w-full md:w-48">
+                        <label className="block text-sm text-gray-400 mb-1">搜尋王</label>
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="輸入關鍵字..." className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[52px]" />
+                        </div>
+                      </div>
+                      <div className="flex-1 w-full">
+                        <label className="block text-sm text-gray-400 mb-1">選擇 BOSS 種類</label>
+                        <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[52px]" required>
+                          {filteredTemplates.length > 0 ? filteredTemplates.map(t => <option key={t.id} value={t.id}>{t.name} {t.level ? `Lv.${t.level}` : ''} (CD: {t.minCooldown || t.cooldownMinutes}{t.maxCooldown && t.maxCooldown !== (t.minCooldown || t.cooldownMinutes) ? `~${t.maxCooldown}` : ''}分)</option>) : <option value="">找不到符合的王</option>}
+                        </select>
+                      </div>
+                      <div className="w-full md:w-28">
+                        <label className="block text-sm text-gray-400 mb-1">分流</label>
+                        <input type="text" value={channelInput} onChange={(e) => setChannelInput(e.target.value)} placeholder="例如: 3" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[52px]" required />
+                      </div>
+                      <div className="w-full md:w-auto mt-2 md:mt-0">
+                        <button type="submit" disabled={isReporting || !selectedTemplateId} className="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-3 h-[52px] rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center shadow-lg shadow-blue-900/20">
+                          {isReporting ? '處理中' : '開始倒數'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </section>
+
+                <section className="space-y-4 animate-in fade-in duration-300">
+                  {/* 玩家視角 BOSS 列表 Header 排序 */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2">
+                    <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2">
+                      <Clock className="w-6 h-6 text-yellow-500" />
+                      各頻道 BOSS 狀態
+                    </h2>
+                    <select value={bossSort} onChange={e=>setBossSort(e.target.value)} className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full sm:w-auto">
+                      <option value="earliest">預設排序 (快到慢)</option>
+                      <option value="levelDesc">等級排序 (高到低)</option>
+                      <option value="levelAsc">等級排序 (低到高)</option>
                     </select>
                   </div>
-                  <div className="w-full md:w-28">
-                    <label className="block text-sm text-gray-400 mb-1">分流</label>
-                    <input type="text" value={channelInput} onChange={(e) => setChannelInput(e.target.value)} placeholder="例如: 3" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[52px]" required />
-                  </div>
-                  <div className="w-full md:w-auto mt-2 md:mt-0">
-                    <button type="submit" disabled={isReporting || !selectedTemplateId} className="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-3 h-[52px] rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center shadow-lg shadow-blue-900/20">
-                      {isReporting ? '處理中' : '開始倒數'}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </section>
 
-            <section className="space-y-4">
-              <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2 px-2">
-                <Clock className="w-6 h-6 text-yellow-500" />
-                各頻道 BOSS 狀態
-              </h2>
-              {displayBosses.length === 0 ? (
-                <div className="text-center py-16 bg-gray-800 rounded-2xl border border-gray-700 border-dashed">
-                  <Skull className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-                  <p className="text-gray-400">目前沒有活躍的重生計時資訊。<br/>請從上方回報擊殺來啟動計時！</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {displayBosses.map(group => {
-                    const isExpanded = expandedBosses[group.id];
-                    const { text: earliestText, isAlive: earliestIsAlive } = formatCountdown(group.earliestSpawn);
-                    
-                    return (
-                      <div key={group.id} className={`bg-gray-800 rounded-2xl border transition-all duration-300 overflow-hidden ${earliestIsAlive ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.1)]' : 'border-gray-700 hover:border-gray-600'}`}>
-                        <div onClick={() => toggleExpand(group.id)} className="p-4 sm:p-5 cursor-pointer flex items-center justify-between select-none bg-gray-800 hover:bg-gray-750 transition-colors">
-                          <div className="flex items-center gap-4">
-                            <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${earliestIsAlive ? 'border-green-500/40' : 'border-gray-700'}`}>
-                              {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${earliestIsAlive ? 'text-green-400' : 'text-gray-500'}`} />}
-                            </div>
-                            <div>
-                              <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-                                {group.name}
-                                {group.channels.length > 0 && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">{group.channels.length} 個分流</span>}
-                              </h3>
-                              <div className="text-sm mt-1 flex items-center gap-1.5 sm:gap-2">
-                                <span className="text-gray-400 hidden sm:inline">最快重生:</span>
-                                <span className={`font-mono ${earliestIsAlive ? 'text-green-400 font-bold drop-shadow-[0_0_5px_rgba(74,222,128,0.3)]' : 'text-red-400'}`}>
-                                  {earliestText.replace('🔴 剩餘: ', '')} 
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="p-2 bg-gray-900 rounded-full border border-gray-700 shrink-0">
-                            {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
-                          </div>
-                        </div>
+                  {displayBosses.length === 0 ? (
+                    <div className="text-center py-16 bg-gray-800 rounded-2xl border border-gray-700 border-dashed">
+                      <Skull className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-400">目前沒有活躍的重生計時資訊。<br/>請從上方回報擊殺來啟動計時！</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {displayBosses.map(group => {
+                        const isExpanded = expandedBosses[group.id];
+                        const { text: earliestText, isAlive: earliestIsAlive } = formatCountdown(group.earliestSpawn);
+                        
+                        // 計算即將重生的分流數量（10分鐘內）
+                        const warningCount = group.channels.filter(ch => {
+                          const diff = ch.nextSpawn - now;
+                          return diff > 0 && diff <= 10 * 60 * 1000;
+                        }).length;
 
-                        {isExpanded && (
-                          <div className="border-t border-gray-700 bg-gray-900/50 p-3 sm:p-4 animate-in slide-in-from-top-2 duration-200">
-                            <div className="flex flex-col gap-3">
-                              {/* 全伺服器狀態條 */}
-                              {group.effectiveGlobalSpawn !== null && (
-                                <div className={`flex items-center justify-between p-3 rounded-xl border relative overflow-hidden ${group.effectiveGlobalSpawn <= now ? 'bg-green-500/10 border-green-500/40 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'bg-purple-900/20 border-purple-500/40'}`}>
-                                  <div className="flex items-center gap-3 relative z-10">
-                                    <div className={`flex flex-col items-center justify-center border rounded-lg px-3 py-1 min-w-[4rem] ${group.effectiveGlobalSpawn <= now ? 'bg-green-900/50 border-green-500/50' : 'bg-purple-900/50 border-purple-500/50'}`}>
-                                      <Server className={`w-4 h-4 mb-0.5 ${group.effectiveGlobalSpawn <= now ? 'text-green-400' : 'text-purple-400'}`} />
-                                      <span className={`font-bold text-xs leading-tight ${group.effectiveGlobalSpawn <= now ? 'text-green-300' : 'text-purple-300'}`}>全伺服器</span>
-                                    </div>
-                                    <div className="text-xs text-gray-400 flex flex-col gap-1">
-                                      <span className="text-gray-300 tracking-wide">系統維修 / 全域計時</span>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-3 relative z-10">
-                                    <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${group.effectiveGlobalSpawn <= now ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]' : 'text-purple-400'}`}>
-                                      {formatCountdown(group.effectiveGlobalSpawn).text.replace('🔴 剩餘: ', '')}
+                        return (
+                          <div key={group.id} className={`bg-gray-800 rounded-2xl border transition-all duration-300 overflow-hidden ${earliestIsAlive ? 'border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.1)]' : warningCount > 0 ? 'border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : 'border-gray-700 hover:border-gray-600'}`}>
+                            <div onClick={() => toggleExpand(group.id)} className="p-4 sm:p-5 cursor-pointer flex items-center justify-between select-none bg-gray-800 hover:bg-gray-750 transition-colors">
+                              <div className="flex items-center gap-4">
+                                <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${earliestIsAlive ? 'border-green-500/40' : warningCount > 0 ? 'border-red-500/40' : 'border-gray-700'}`}>
+                                  {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${earliestIsAlive ? 'text-green-400' : warningCount > 0 ? 'text-red-400' : 'text-gray-500'}`} />}
+                                </div>
+                                <div>
+                                  <h3 className="text-lg sm:text-xl font-bold text-white flex items-center flex-wrap gap-2">
+                                    {group.name} {group.level && <span className="text-yellow-400 text-sm sm:text-base">Lv.{group.level}</span>}
+                                    {group.channels.length > 0 && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">{group.channels.length} 分流</span>}
+                                    {warningCount > 0 && <span className="text-[11px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse">{warningCount} 將重生</span>}
+                                  </h3>
+                                  <div className="text-sm mt-1 flex items-center gap-1.5 sm:gap-2">
+                                    <span className="text-gray-400 hidden sm:inline">最快重生:</span>
+                                    <span className={`font-mono ${earliestIsAlive ? 'text-green-400 font-bold drop-shadow-[0_0_5px_rgba(74,222,128,0.3)]' : warningCount > 0 ? 'text-red-400 font-bold' : 'text-red-400'}`}>
+                                      {earliestText.replace('🔴 剩餘: ', '')} 
                                     </span>
                                   </div>
                                 </div>
-                              )}
+                              </div>
+                              <div className="p-2 bg-gray-900 rounded-full border border-gray-700 shrink-0">
+                                {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                              </div>
+                            </div>
 
-                              {/* 玩家回報的分流 */}
-                              {group.channels.map(active => {
-                                const diff = active.nextSpawn - now;
-                                const isAlive = diff <= 0;
-                                const isWarning = !isAlive && diff <= 10 * 60 * 1000;
-                                const { text: timeText } = formatCountdown(active.nextSpawn);
-                                
-                                return (
-                                  <div key={active.id} className={`flex items-center justify-between p-3 rounded-xl border relative transition-all duration-300 overflow-hidden ${isAlive ? 'bg-green-500/10 border-green-500/30' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-gray-800 border-gray-700'}`}>
-                                    {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
-                                    
-                                    <div className="flex items-center gap-3 relative z-10">
-                                      <div className={`flex flex-col items-center justify-center border rounded-lg px-3 py-1 min-w-[4rem] ${isWarning ? 'bg-red-900/50 border-red-500/50' : 'bg-gray-900 border-gray-600'}`}>
-                                        <span className={`text-[10px] ${isWarning ? 'text-red-300' : 'text-gray-500'}`}>CH</span>
-                                        <span className={`font-bold text-lg leading-tight ${isWarning ? 'text-red-400' : 'text-blue-400'}`}>{active.channel}</span>
+                            {isExpanded && (
+                              <div className="border-t border-gray-700 bg-gray-900/50 p-3 sm:p-4 animate-in slide-in-from-top-2 duration-200">
+                                <div className="flex flex-col gap-3">
+                                  {/* 全伺服器狀態條 */}
+                                  {group.effectiveGlobalSpawn !== null && (
+                                    <div className={`flex items-center justify-between p-3 rounded-xl border relative overflow-hidden ${group.effectiveGlobalSpawn <= now ? 'bg-green-500/10 border-green-500/40 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'bg-purple-900/20 border-purple-500/40'}`}>
+                                      <div className="flex items-center gap-3 relative z-10">
+                                        <div className={`flex flex-col items-center justify-center border rounded-lg px-3 py-1 min-w-[4rem] ${group.effectiveGlobalSpawn <= now ? 'bg-green-900/50 border-green-500/50' : 'bg-purple-900/50 border-purple-500/50'}`}>
+                                          <Server className={`w-4 h-4 mb-0.5 ${group.effectiveGlobalSpawn <= now ? 'text-green-400' : 'text-purple-400'}`} />
+                                          <span className={`font-bold text-xs leading-tight ${group.effectiveGlobalSpawn <= now ? 'text-green-300' : 'text-purple-300'}`}>全伺服器</span>
+                                        </div>
+                                        <div className="text-xs text-gray-400 flex flex-col gap-1">
+                                          <span className="text-gray-300 tracking-wide">系統維修 / 全域計時</span>
+                                        </div>
                                       </div>
-                                      <div className="text-xs text-gray-400 flex flex-col gap-1">
-                                        <span className="flex items-center gap-1 text-gray-300">
-                                          <History className="w-3.5 h-3.5"/> 
-                                          {new Date(active.lastKilled).toLocaleTimeString('zh-TW', { hour12: false })}
-                                          <span className="text-blue-300/80 ml-1.5 font-medium truncate max-w-[80px] sm:max-w-none" title={active.reporterName}>({active.reporterName || '未知'})</span>
+                                      <div className="flex items-center gap-3 relative z-10">
+                                        <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${group.effectiveGlobalSpawn <= now ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]' : 'text-purple-400'}`}>
+                                          {formatCountdown(group.effectiveGlobalSpawn).text.replace('🔴 剩餘: ', '')}
                                         </span>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-3 relative z-10">
-                                      {isWarning && <Flame className="w-5 h-5 text-red-500 animate-bounce" />}
-                                      <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${isAlive ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]' : isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
-                                        {timeText.replace('🔴 剩餘: ', '')}
-                                      </span>
-                                      {isAdmin && (
-                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1.5 rounded-lg transition-colors border border-transparent ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title="管理員刪除此紀錄">
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                  )}
+
+                                  {/* 玩家回報的分流 */}
+                                  {group.channels.map(active => {
+                                    const diff = active.nextSpawn - now;
+                                    const isAlive = diff <= 0;
+                                    const isWarning = !isAlive && diff <= 10 * 60 * 1000;
+                                    const { text: timeText } = formatCountdown(active.nextSpawn);
+                                    
+                                    return (
+                                      <div key={active.id} className={`flex items-center justify-between p-3 rounded-xl border relative transition-all duration-300 overflow-hidden ${isAlive ? 'bg-green-500/10 border-green-500/30' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-gray-800 border-gray-700'}`}>
+                                        {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
+                                        
+                                        <div className="flex items-center gap-3 relative z-10">
+                                          <div className={`flex flex-col items-center justify-center border rounded-lg px-3 py-1 min-w-[4rem] ${isWarning ? 'bg-red-900/50 border-red-500/50' : 'bg-gray-900 border-gray-600'}`}>
+                                            <span className={`text-[10px] ${isWarning ? 'text-red-300' : 'text-gray-500'}`}>CH</span>
+                                            <span className={`font-bold text-lg leading-tight ${isWarning ? 'text-red-400' : 'text-blue-400'}`}>{active.channel}</span>
+                                          </div>
+                                          <div className="text-xs text-gray-400 flex flex-col gap-1">
+                                            <span className="flex items-center gap-1 text-gray-300">
+                                              <History className="w-3.5 h-3.5"/> 
+                                              {new Date(active.lastKilled).toLocaleTimeString('zh-TW', { hour12: false })}
+                                              <span className="text-blue-300/80 ml-1.5 font-medium truncate max-w-[80px] sm:max-w-none" title={active.reporterName}>({active.reporterName || '未知'})</span>
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-3 relative z-10">
+                                          {isWarning && <Flame className="w-5 h-5 text-red-500 animate-bounce" />}
+                                          <span className={`font-mono font-medium tracking-wide text-sm sm:text-base ${isAlive ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]' : isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                                            {timeText.replace('🔴 剩餘: ', '')}
+                                          </span>
+                                          {isAdmin && (
+                                            <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1.5 rounded-lg transition-colors border border-transparent ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title="管理員刪除此紀錄">
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
           </div>
         </div>
       );
