@@ -6,9 +6,11 @@
   
   <!-- SEO & 社群分享設定 (LINE, Discord 預覽) -->
   <title>Waku野王重生計時器</title>
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://wakubosstime.vercel.app/">
   <meta property="og:title" content="Waku野王重生計時器">
   <meta property="og:description" content="Waku即時的野王重生倒數追蹤工具。">
-  <meta property="og:image" content="./logo2.png">
+  <meta property="og:image" content="https://wakubosstime.vercel.app/logo2.png">
   <link rel="icon" href="./logo2.png" type="image/png">
   
   <!-- 手機主畫面 PWA/App Icon 設定 -->
@@ -294,7 +296,7 @@
       });
       
       // 排序狀態
-      const [bossSort, setBossSort] = useState('earliest'); // 'earliest', 'levelDesc', 'levelAsc', 'hasRecordOnly'
+      const [bossSort, setBossSort] = useState('levelAsc'); // 'levelAsc', 'levelDesc', 'earliest', 'hasRecordOnly'
       const [adminSortOrder, setAdminSortOrder] = useState('levelDesc'); // 'name', 'levelDesc', 'levelAsc'
       
       // 表單狀態
@@ -429,12 +431,17 @@
             }
           });
 
-          return { ...template, channels, effectiveGlobalSpawn, effectiveGlobalMaxSpawn, earliestSpawn: earliest, earliestMaxSpawn: earliestMax, hasRecord: channels.length > 0 || effectiveGlobalSpawn !== null };
+          // 【修正邏輯】: 必須是有玩家回報分流，或是管理員手動標記重生 / 全域計時尚未過期，才算作「有紀錄」
+          const isGlobalActive = template.globalIsAlive || (effectiveGlobalMaxSpawn !== null && effectiveGlobalMaxSpawn > Date.now());
+          const hasRecord = channels.length > 0 || isGlobalActive;
+
+          return { ...template, channels, effectiveGlobalSpawn, effectiveGlobalMaxSpawn, earliestSpawn: earliest, earliestMaxSpawn: earliestMax, hasRecord };
         });
 
         // 判斷是否為「只顯示有紀錄」模式
         if (bossSort === 'hasRecordOnly') {
-          processed = processed.filter(b => b.hasRecord);
+          // 【修正邏輯】: 就算沒有紀錄，只要玩家有釘選(pinned)，就強制顯示不受隱藏規則影響
+          processed = processed.filter(b => pinnedBosses.includes(b.id) || b.hasRecord);
         }
 
         // 排序邏輯 (包含釘選置頂邏輯)
@@ -449,14 +456,16 @@
            if (bossSort === 'levelDesc') return (b.level || 0) - (a.level || 0) || a.name.localeCompare(b.name);
            if (bossSort === 'levelAsc' || bossSort === 'hasRecordOnly') return (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name);
            
-           // 'earliest'
-           const aTime = (a.hasRecord && a.earliestSpawn !== null) ? a.earliestSpawn : Infinity;
-           const bTime = (b.hasRecord && b.earliestSpawn !== null) ? b.earliestSpawn : Infinity;
+           // 'earliest' -> 改為依照管理員設定的 CD 時間 (快到慢) 排序
+           const aCD = a.minCooldown || a.cooldownMinutes || Infinity;
+           const bCD = b.minCooldown || b.cooldownMinutes || Infinity;
            
-           if (aTime === Infinity && bTime === Infinity) {
-               return a.name.localeCompare(b.name); // 若都沒有紀錄，照名稱排
+           // 如果 CD 時間相同，則依等級 (低到高) -> 名稱排序作為次要條件
+           if (aCD === bCD) {
+               return (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name);
            }
-           return aTime - bTime;
+           
+           return aCD - bCD;
         });
       }, [bossTemplates, activeBosses, bossSort, pinnedBosses]); 
 
@@ -577,7 +586,7 @@
           const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
           await updateDoc(doc(db, 'bossTemplates', template.id), { 
             globalNextSpawn: baseTime + ((template.minCooldown || template.cooldownMinutes) * 60 * 1000), 
-            globalMaxSpawn: baseTime + ((template.maxCooldown || template.minCooldown || template.cooldownMinutes) * 60 * 1000), 
+            globalMaxSpawn: baseTime + ((template.maxCooldown || template.minCooldown || t.cooldownMinutes) * 60 * 1000), 
             globalIsAlive: false 
           }); 
           showMessage(`${template.name} 已開始全線倒數`, "success"); 
@@ -1077,10 +1086,10 @@
                       </div>
                     </div>
                     <select value={bossSort} onChange={e=>setBossSort(e.target.value)} className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full sm:w-auto">
-                      <option value="earliest">預設排序 (快到慢)</option>
-                      <option value="levelDesc">等級排序 (高到低)</option>
-                      <option value="levelAsc">等級排序 (低到高)</option>
-                      <option value="hasRecordOnly">只顯示有紀錄 (等級低到高)</option>
+                      <option value="levelAsc">等級低到高</option>
+                      <option value="levelDesc">等級高到低</option>
+                      <option value="earliest">CD時間排序</option>
+                      <option value="hasRecordOnly">顯示有紀錄Boss</option>
                     </select>
                   </div>
 
