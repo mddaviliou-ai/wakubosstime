@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <!-- SEO & 社群分享設定 (LINE, Discord 預覽) -->
-  <title>Waku野王重生計時</title>
+  <title>Waku野王重生計時器</title>
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://wakubosstime.vercel.app/">
   <meta property="og:title" content="Waku野王重生計時">
@@ -79,12 +79,13 @@
     function AdminUserRow({ user, appUser, showMessage }) {
       const [uName, setUName] = useState(user.username);
       const [uPwd, setUPwd] = useState(user.password);
+      const [uCanClearStale, setUCanClearStale] = useState(user.canClearStale || false);
       const isSelf = user.id === appUser.id;
 
       const handleSave = async () => {
         if (!uName.trim() || !uPwd.trim()) return showMessage('欄位不可空白', 'error');
         try {
-          await updateDoc(doc(db, 'users', user.id), { username: uName.trim(), password: uPwd.trim() });
+          await updateDoc(doc(db, 'users', user.id), { username: uName.trim(), password: uPwd.trim(), canClearStale: uCanClearStale });
           showMessage(`已更新 ${uName} 的資料`, 'success');
         } catch (e) { showMessage('更新失敗', 'error'); }
       };
@@ -105,6 +106,13 @@
           <div className="flex flex-col w-full md:w-1/4">
              <label className="text-xs text-gray-500 mb-1">登入密碼</label>
              <input type="text" value={uPwd} onChange={e=>setUPwd(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500" />
+          </div>
+          <div className="flex flex-col w-full md:w-auto">
+             <label className="text-xs text-gray-500 mb-1">進階權限</label>
+             <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer h-[38px] bg-gray-800 border border-gray-600 rounded-lg px-3 hover:border-purple-500 transition-colors">
+               <input type="checkbox" checked={uCanClearStale} onChange={e => setUCanClearStale(e.target.checked)} className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-purple-600 focus:ring-purple-500" />
+               清4hr紀錄
+             </label>
           </div>
           <div className="flex items-end gap-2 w-full md:w-auto mt-2 md:mt-0 md:pt-5">
             <button onClick={handleSave} className="bg-gray-700 hover:bg-purple-600 text-white p-2 rounded-lg transition-colors flex items-center justify-center" title="儲存修改"><Save className="w-5 h-5"/></button>
@@ -184,6 +192,7 @@
               password: pass,
               role: isAdmin ? 'admin' : 'user',
               status: isAdmin ? 'approved' : 'pending',
+              canClearStale: isAdmin ? true : false,
               createdAt: Date.now()
             };
 
@@ -289,6 +298,9 @@
       const [showPwdModal, setShowPwdModal] = useState(false);
       const [newPwd, setNewPwd] = useState('');
       
+      // 自訂確認視窗狀態 (取代 window.confirm)
+      const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
+      
       // 個人釘選狀態 (存在 LocalStorage)
       const [pinnedBosses, setPinnedBosses] = useState(() => {
         const saved = localStorage.getItem(`wakuboss_pinned_${appUser.id}`);
@@ -316,6 +328,18 @@
       const [isReporting, setIsReporting] = useState(false);
       const [isResettingGlobal, setIsResettingGlobal] = useState(false);
       const [globalBaseTime, setGlobalBaseTime] = useState(''); // 管理員自訂基準時間
+
+      // 呼叫確認視窗的輔助函式
+      const requestConfirm = (message, onConfirmCallback) => {
+        setConfirmDialog({
+            isOpen: true,
+            message,
+            onConfirm: () => {
+                setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
+                onConfirmCallback();
+            }
+        });
+      };
 
       // --- 計時器 Setup ---
       useEffect(() => {
@@ -555,30 +579,38 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
       };
 
+      // 替換原本的 window.confirm 為 requestConfirm
       const handleDeleteTemplate = async (templateId) => {
-        if (!window.confirm("確定要刪除這個種類嗎？")) return;
-        try { await deleteDoc(doc(db, 'bossTemplates', templateId)); showMessage("刪除成功", "success"); } catch (error) { showMessage("刪除失敗", "error"); }
+        requestConfirm("確定要刪除這個種類嗎？", async () => {
+          try { await deleteDoc(doc(db, 'bossTemplates', templateId)); showMessage("刪除成功", "success"); } 
+          catch (error) { showMessage("刪除失敗", "error"); }
+        });
       };
 
+      // 替換原本的 window.confirm 為 requestConfirm
       const handleDeleteActiveBoss = async (activeId) => {
-        if (!window.confirm("確定要手動刪除這筆分流計時紀錄嗎？")) return;
-        try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } catch(e) { showMessage("刪除失敗", "error"); }
+        requestConfirm("確定要手動刪除這筆分流計時紀錄嗎？", async () => {
+          try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } 
+          catch(e) { showMessage("刪除失敗", "error"); }
+        });
       };
 
+      // 替換原本的 window.confirm 為 requestConfirm
       const handleResetAllBosses = async () => {
-        if (!window.confirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(將使用您輸入的基準時間計算)")) return;
-        try {
-          setIsResettingGlobal(true);
-          const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
-          const activeSnap = await getDocs(collection(db, 'activeBosses'));
-          await Promise.all(activeSnap.docs.map(d => deleteDoc(d.ref)));
-          await Promise.all(bossTemplates.map(t => updateDoc(doc(db, 'bossTemplates', t.id), { 
-            globalNextSpawn: baseTime + ((t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
-            globalMaxSpawn: baseTime + ((t.maxCooldown || t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
-            globalIsAlive: false 
-          })));
-          showMessage("全伺服器王重生時間已重置！", "success");
-        } catch (error) { showMessage("全域重置失敗", "error"); } finally { setIsResettingGlobal(false); }
+        requestConfirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(將使用您輸入的基準時間計算)", async () => {
+          try {
+            setIsResettingGlobal(true);
+            const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
+            const activeSnap = await getDocs(collection(db, 'activeBosses'));
+            await Promise.all(activeSnap.docs.map(d => deleteDoc(d.ref)));
+            await Promise.all(bossTemplates.map(t => updateDoc(doc(db, 'bossTemplates', t.id), { 
+              globalNextSpawn: baseTime + ((t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
+              globalMaxSpawn: baseTime + ((t.maxCooldown || t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
+              globalIsAlive: false 
+            })));
+            showMessage("全伺服器王重生時間已重置！", "success");
+          } catch (error) { showMessage("全域重置失敗", "error"); } finally { setIsResettingGlobal(false); }
+        });
       };
 
       const handleGlobalResetSingle = async (template) => {
@@ -656,6 +688,7 @@
       };
 
       // --- 管理員：一鍵清除該王確定重生超過 4 小時的紀錄 ---
+      // 替換原本的 window.confirm 為 requestConfirm
       const handleClearStaleRecords = async (group) => {
         const FOUR_HOURS = 4 * 60 * 60 * 1000;
         const staleRecords = group.channels.filter(ch => {
@@ -668,17 +701,17 @@
           return;
         }
 
-        if (!window.confirm(`確定要清除 ${staleRecords.length} 筆「確定重生」已超過 4 小時的分流紀錄嗎？`)) return;
-
-        try {
-          setIsReporting(true);
-          await Promise.all(staleRecords.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
-          showMessage(`已成功清除 ${staleRecords.length} 筆過期紀錄`, 'success');
-        } catch (error) {
-          showMessage("清除失敗，請確認權限", "error");
-        } finally {
-          setIsReporting(false);
-        }
+        requestConfirm(`確定要清除 ${staleRecords.length} 筆「確定重生」已超過 4 小時的分流紀錄嗎？`, async () => {
+          try {
+            setIsReporting(true);
+            await Promise.all(staleRecords.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
+            showMessage(`已成功清除 ${staleRecords.length} 筆過期紀錄`, 'success');
+          } catch (error) {
+            showMessage("清除失敗，請確認權限", "error");
+          } finally {
+            setIsReporting(false);
+          }
+        });
       };
 
       const formatCountdown = (nextSpawnTime, maxSpawnTime) => {
@@ -706,6 +739,23 @@
       return (
         <div className="p-4 md:p-8 font-sans">
           
+          {/* 自訂確認 Modal (取代 window.confirm) */}
+          {confirmDialog.isOpen && (
+            <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700 w-full max-w-sm shadow-2xl">
+                <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                   <ShieldAlert className="w-5 h-5 text-yellow-500" />
+                   確認操作
+                </h3>
+                <p className="text-gray-300 mb-6 whitespace-pre-line leading-relaxed">{confirmDialog.message}</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setConfirmDialog({ isOpen: false, message: '', onConfirm: null })} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-2.5 rounded-xl transition-colors">取消</button>
+                  <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-medium py-2.5 rounded-xl transition-colors">確定</button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 修改密碼 Modal */}
           {showPwdModal && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-in fade-in">
@@ -794,7 +844,7 @@
                         </div>
                       </div>
                       
-                      {isAdmin && group.channels.length > 0 && (
+                      {(isAdmin || appUser.canClearStale) && group.channels.length > 0 && (
                         <button onClick={() => handleClearStaleRecords(group)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50">
                           <Trash2 className="w-3.5 h-3.5" /> 清除過期 (4hr+)
                         </button>
