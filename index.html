@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <!-- SEO & 社群分享設定 (LINE, Discord 預覽) -->
-  <title>Waku野王重生計時器</title>
+  <title>Waku野王重生計時</title>
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://wakubosstime.vercel.app/">
   <meta property="og:title" content="Waku野王重生計時">
-  <meta property="og:description" content="Waku即時的野王重生倒數追蹤工具。">
+  <meta property="og:description" content="即時的野王重生倒數追蹤工具。">
   <meta property="og:image" content="https://wakubosstime.vercel.app/logo2.png">
   <link rel="icon" href="./logo2.png" type="image/png">
   
@@ -52,7 +52,7 @@
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInAnonymously } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where, getDoc } from 'firebase/firestore';
-    import { Clock, History, Activity, Plus, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star } from 'lucide-react';
+    import { Clock, History, Activity, Plus, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff } from 'lucide-react';
 
     // ==========================================
     // 1. Firebase 初始化設定
@@ -76,10 +76,11 @@
     // ==========================================
     // 獨立子組件：管理員會員列表的一列 (修復輸入框因時間更新而跳動的問題)
     // ==========================================
-    function AdminUserRow({ user, appUser, showMessage }) {
+    function AdminUserRow({ user, appUser, showMessage, requestConfirm }) {
       const [uName, setUName] = useState(user.username);
       const [uPwd, setUPwd] = useState(user.password);
       const [uCanClearStale, setUCanClearStale] = useState(user.canClearStale || false);
+      const [showPwd, setShowPwd] = useState(false);
       const isSelf = user.id === appUser.id;
 
       const handleSave = async () => {
@@ -97,28 +98,48 @@
         showMessage(`已將 ${user.username} 設為 ${newStatus === 'approved' ? '開通' : '停權'}`, 'success');
       };
 
+      const handleDeleteUser = () => {
+        if (isSelf) return showMessage('無法刪除自己的帳號', 'error');
+        requestConfirm(`確定要永久刪除會員「${user.username}」嗎？這將無法復原。`, async () => {
+          try {
+            await deleteDoc(doc(db, 'users', user.id));
+            showMessage(`已刪除會員 ${user.username}`, 'success');
+          } catch (error) {
+            showMessage('刪除失敗', 'error');
+          }
+        });
+      };
+
       return (
-        <div className="flex flex-col md:flex-row items-center gap-3 p-4 bg-gray-900 border border-gray-700 rounded-xl hover:border-purple-500/50 transition-colors">
-          <div className="flex flex-col w-full md:w-1/4">
+        <div className="flex flex-col md:flex-row items-start md:items-end gap-3 p-4 bg-gray-900 border border-gray-700 rounded-xl hover:border-purple-500/50 transition-colors">
+          <div className="flex flex-col w-full md:w-40 shrink-0">
              <label className="text-xs text-gray-500 mb-1">帳號 (DC名稱)</label>
-             <input type="text" value={uName} onChange={e=>setUName(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500" />
+             <input type="text" value={uName} onChange={e=>setUName(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 h-[38px]" />
           </div>
-          <div className="flex flex-col w-full md:w-1/4">
+          <div className="flex flex-col w-full md:w-40 shrink-0">
              <label className="text-xs text-gray-500 mb-1">登入密碼</label>
-             <input type="text" value={uPwd} onChange={e=>setUPwd(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500" />
+             <div className="relative">
+               <input type={showPwd ? "text" : "password"} value={uPwd} onChange={e=>setUPwd(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-3 pr-10 py-2 text-white focus:outline-none focus:border-purple-500 h-[38px]" />
+               <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors p-1" title={showPwd ? "隱藏密碼" : "顯示密碼"}>
+                 {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+               </button>
+             </div>
           </div>
-          <div className="flex flex-col w-full md:w-auto">
+          <div className="flex flex-col w-full md:w-auto shrink-0">
              <label className="text-xs text-gray-500 mb-1">進階權限</label>
              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer h-[38px] bg-gray-800 border border-gray-600 rounded-lg px-3 hover:border-purple-500 transition-colors">
                <input type="checkbox" checked={uCanClearStale} onChange={e => setUCanClearStale(e.target.checked)} className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-purple-600 focus:ring-purple-500" />
                清4hr紀錄
              </label>
           </div>
-          <div className="flex items-end gap-2 w-full md:w-auto mt-2 md:mt-0 md:pt-5">
-            <button onClick={handleSave} className="bg-gray-700 hover:bg-purple-600 text-white p-2 rounded-lg transition-colors flex items-center justify-center" title="儲存修改"><Save className="w-5 h-5"/></button>
+          <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
+             <div className="flex gap-2">
+               <button onClick={handleSave} className="bg-gray-700 hover:bg-purple-600 text-white p-2 rounded-lg transition-colors flex items-center justify-center h-[38px] w-[38px]" title="儲存修改"><Save className="w-5 h-5"/></button>
+               <button onClick={handleDeleteUser} disabled={isSelf} className="bg-gray-700 hover:bg-red-600 text-white p-2 rounded-lg transition-colors flex items-center justify-center h-[38px] w-[38px] disabled:opacity-50 disabled:grayscale" title="刪除會員"><Trash2 className="w-5 h-5"/></button>
+             </div>
           </div>
-          <div className="flex flex-1 items-end gap-2 w-full mt-2 md:mt-0 md:pt-5 md:justify-end">
-             <button onClick={handleToggleStatus} disabled={isSelf} className={`px-4 py-2 rounded-lg text-sm font-bold w-full md:w-auto transition-colors ${user.status === 'approved' ? 'bg-green-600/20 text-green-400 border border-green-500/50 hover:bg-green-600/30' : 'bg-red-600/20 text-red-400 border border-red-500/50 hover:bg-red-600/30 animate-pulse'} disabled:opacity-50 disabled:grayscale`}>
+          <div className="flex flex-1 items-end gap-2 w-full mt-2 md:mt-0 md:justify-end">
+             <button onClick={handleToggleStatus} disabled={isSelf} className={`h-[38px] px-4 py-2 rounded-lg text-sm font-bold w-full md:w-auto transition-colors flex items-center justify-center whitespace-nowrap ${user.status === 'approved' ? 'bg-green-600/20 text-green-400 border border-green-500/50 hover:bg-green-600/30' : 'bg-red-600/20 text-red-400 border border-red-500/50 hover:bg-red-600/30 animate-pulse'} disabled:opacity-50 disabled:grayscale`}>
                {user.status === 'approved' ? '🟢 已開通 (點擊停權)' : '🔴 審核中 (點擊開通)'}
              </button>
           </div>
@@ -1108,7 +1129,7 @@
                        allUsers.length === 0 ? (
                          <p className="text-gray-500 text-center py-6">目前尚無其他會員。</p>
                        ) : (
-                         allUsers.map(u => <AdminUserRow key={u.id} user={u} appUser={appUser} showMessage={showMessage} />)
+                         allUsers.map(u => <AdminUserRow key={u.id} user={u} appUser={appUser} showMessage={showMessage} requestConfirm={requestConfirm} />)
                        )
                      )}
                   </div>
