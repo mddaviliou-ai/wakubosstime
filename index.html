@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <!-- SEO & 社群分享設定 (LINE, Discord 預覽) -->
-  <title>Waku野王重生計時</title>
+  <title>Waku野王重生計時器</title>
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://wakubosstime.vercel.app/">
-  <meta property="og:title" content="Waku野王重生計時">
-  <meta property="og:description" content="即時的野王重生倒數追蹤工具。">
+  <meta property="og:title" content="Waku野王重生計時器">
+  <meta property="og:description" content="Waku即時的野王重生倒數追蹤工具。">
   <meta property="og:image" content="https://wakubosstime.vercel.app/logo2.png">
   <link rel="icon" href="./logo2.png" type="image/png">
   
@@ -23,6 +23,15 @@
   <!-- 引入 Tailwind CSS 樣式 -->
   <script src="https://cdn.tailwindcss.com"></script>
   
+  <!-- 自訂滾動條樣式 -->
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(75, 85, 99, 0.6); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(107, 114, 128, 0.9); }
+    * { scrollbar-width: thin; scrollbar-color: rgba(75, 85, 99, 0.6) transparent; }
+  </style>
+
   <!-- 定義 ES Modules -->
   <script type="importmap">
     {
@@ -76,17 +85,21 @@
     // ==========================================
     // 獨立子組件：管理員會員列表的一列 (修復輸入框因時間更新而跳動的問題)
     // ==========================================
-    function AdminUserRow({ user, appUser, showMessage, requestConfirm }) {
+    function AdminUserRow({ user, appUser, showMessage }) {
       const [uName, setUName] = useState(user.username);
       const [uPwd, setUPwd] = useState(user.password);
-      const [uCanClearStale, setUCanClearStale] = useState(user.canClearStale || false);
+      const [canClearStale, setCanClearStale] = useState(user.canClearStale || false);
       const [showPwd, setShowPwd] = useState(false);
       const isSelf = user.id === appUser.id;
 
       const handleSave = async () => {
         if (!uName.trim() || !uPwd.trim()) return showMessage('欄位不可空白', 'error');
         try {
-          await updateDoc(doc(db, 'users', user.id), { username: uName.trim(), password: uPwd.trim(), canClearStale: uCanClearStale });
+          await updateDoc(doc(db, 'users', user.id), { 
+            username: uName.trim(), 
+            password: uPwd.trim(),
+            canClearStale: canClearStale
+          });
           showMessage(`已更新 ${uName} 的資料`, 'success');
         } catch (e) { showMessage('更新失敗', 'error'); }
       };
@@ -98,48 +111,50 @@
         showMessage(`已將 ${user.username} 設為 ${newStatus === 'approved' ? '開通' : '停權'}`, 'success');
       };
 
-      const handleDeleteUser = () => {
+      const handleDeleteUser = async () => {
         if (isSelf) return showMessage('無法刪除自己的帳號', 'error');
-        requestConfirm(`確定要永久刪除會員「${user.username}」嗎？這將無法復原。`, async () => {
-          try {
-            await deleteDoc(doc(db, 'users', user.id));
-            showMessage(`已刪除會員 ${user.username}`, 'success');
-          } catch (error) {
-            showMessage('刪除失敗', 'error');
-          }
-        });
+        if (!window.confirm(`確定要永久刪除會員「${user.username}」嗎？此操作無法還原。`)) return;
+        try {
+          await deleteDoc(doc(db, 'users', user.id));
+          showMessage(`已刪除會員 ${user.username}`, 'success');
+        } catch(e) {
+          showMessage('刪除失敗', 'error');
+        }
       };
 
       return (
-        <div className="flex flex-col md:flex-row items-start md:items-end gap-3 p-4 bg-gray-900 border border-gray-700 rounded-xl hover:border-purple-500/50 transition-colors">
-          <div className="flex flex-col w-full md:w-40 shrink-0">
-             <label className="text-xs text-gray-500 mb-1">帳號 (DC名稱)</label>
-             <input type="text" value={uName} onChange={e=>setUName(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 h-[38px]" />
+        <div className="flex flex-col md:flex-row items-center gap-3 p-3 bg-gray-900 border border-gray-700 rounded-xl hover:border-purple-500/50 transition-colors">
+          <div className="flex flex-col w-full md:w-[160px] shrink-0">
+             <label className="text-[10px] text-gray-500 mb-0.5">帳號 (DC名稱)</label>
+             <input type="text" value={uName} onChange={e=>setUName(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-white text-sm focus:outline-none focus:border-purple-500" />
           </div>
-          <div className="flex flex-col w-full md:w-40 shrink-0">
-             <label className="text-xs text-gray-500 mb-1">登入密碼</label>
+          <div className="flex flex-col w-full md:w-[140px] shrink-0 relative">
+             <label className="text-[10px] text-gray-500 mb-0.5">登入密碼</label>
              <div className="relative">
-               <input type={showPwd ? "text" : "password"} value={uPwd} onChange={e=>setUPwd(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-3 pr-10 py-2 text-white focus:outline-none focus:border-purple-500 h-[38px]" />
-               <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors p-1" title={showPwd ? "隱藏密碼" : "顯示密碼"}>
-                 {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+               <input type={showPwd ? "text" : "password"} value={uPwd} onChange={e=>setUPwd(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-2.5 pr-8 py-1.5 text-white text-sm focus:outline-none focus:border-purple-500" />
+               <button onClick={() => setShowPwd(!showPwd)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200">
+                 {showPwd ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>}
                </button>
              </div>
           </div>
-          <div className="flex flex-col w-full md:w-auto shrink-0">
-             <label className="text-xs text-gray-500 mb-1">進階權限</label>
-             <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer h-[38px] bg-gray-800 border border-gray-600 rounded-lg px-3 hover:border-purple-500 transition-colors">
-               <input type="checkbox" checked={uCanClearStale} onChange={e => setUCanClearStale(e.target.checked)} className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-purple-600 focus:ring-purple-500" />
-               清4hr紀錄
-             </label>
+          
+          <div className="flex flex-col w-full md:w-auto md:ml-2">
+            <label className="text-[10px] text-gray-500 mb-0.5">進階權限</label>
+            <label className="flex items-center gap-1.5 cursor-pointer bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 hover:border-purple-500 transition-colors">
+              <input type="checkbox" checked={canClearStale} onChange={e=>setCanClearStale(e.target.checked)} className="w-3.5 h-3.5 accent-purple-500 rounded border-gray-600" />
+              <span className="text-sm text-gray-300">清4hr紀錄</span>
+            </label>
           </div>
-          <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
-             <div className="flex gap-2">
-               <button onClick={handleSave} className="bg-gray-700 hover:bg-purple-600 text-white p-2 rounded-lg transition-colors flex items-center justify-center h-[38px] w-[38px]" title="儲存修改"><Save className="w-5 h-5"/></button>
-               <button onClick={handleDeleteUser} disabled={isSelf} className="bg-gray-700 hover:bg-red-600 text-white p-2 rounded-lg transition-colors flex items-center justify-center h-[38px] w-[38px] disabled:opacity-50 disabled:grayscale" title="刪除會員"><Trash2 className="w-5 h-5"/></button>
-             </div>
+
+          <div className="flex items-end gap-1.5 w-full md:w-auto mt-2 md:mt-0 md:pt-[18px]">
+            <button onClick={handleSave} className="bg-gray-700 hover:bg-purple-600 text-white p-1.5 rounded-lg transition-colors flex items-center justify-center shrink-0" title="儲存修改"><Save className="w-4 h-4"/></button>
+            {!isSelf && (
+               <button onClick={handleDeleteUser} className="bg-gray-700 hover:bg-red-600 text-gray-300 hover:text-white p-1.5 rounded-lg transition-colors flex items-center justify-center shrink-0" title="刪除會員"><Trash2 className="w-4 h-4"/></button>
+            )}
           </div>
-          <div className="flex flex-1 items-end gap-2 w-full mt-2 md:mt-0 md:justify-end">
-             <button onClick={handleToggleStatus} disabled={isSelf} className={`h-[38px] px-4 py-2 rounded-lg text-sm font-bold w-full md:w-auto transition-colors flex items-center justify-center whitespace-nowrap ${user.status === 'approved' ? 'bg-green-600/20 text-green-400 border border-green-500/50 hover:bg-green-600/30' : 'bg-red-600/20 text-red-400 border border-red-500/50 hover:bg-red-600/30 animate-pulse'} disabled:opacity-50 disabled:grayscale`}>
+          
+          <div className="flex flex-1 items-end gap-2 w-full mt-2 md:mt-0 md:pt-[18px] md:justify-end">
+             <button onClick={handleToggleStatus} disabled={isSelf} className={`px-3 py-1.5 rounded-lg text-xs font-bold w-full md:w-auto transition-colors ${user.status === 'approved' ? 'bg-green-600/20 text-green-400 border border-green-500/50 hover:bg-green-600/30' : 'bg-red-600/20 text-red-400 border border-red-500/50 hover:bg-red-600/30 animate-pulse'} disabled:opacity-50 disabled:grayscale`}>
                {user.status === 'approved' ? '🟢 已開通 (點擊停權)' : '🔴 審核中 (點擊開通)'}
              </button>
           </div>
@@ -172,9 +187,9 @@
             if (snap.empty) {
               if (trimmedUser === '茶米' && password === 'zaza') {
                 const docRef = await addDoc(collection(db, 'users'), {
-                  username: '茶米', password: 'zaza', role: 'admin', status: 'approved', createdAt: Date.now()
+                  username: '茶米', password: 'zaza', role: 'admin', status: 'approved', createdAt: Date.now(), canClearStale: true
                 });
-                const adminUser = { id: docRef.id, username: '茶米', role: 'admin', status: 'approved' };
+                const adminUser = { id: docRef.id, username: '茶米', role: 'admin', status: 'approved', canClearStale: true };
                 localStorage.setItem('wakuboss_user_id', docRef.id);
                 setAppUser(adminUser);
                 showMessage('管理員帳號已自動建立並登入', 'success');
@@ -237,7 +252,7 @@
               <div className="w-20 h-20 mb-4 bg-gray-900 rounded-2xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg">
                 <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
               </div>
-              <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時</h1>
+              <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時器</h1>
               <p className="text-gray-400 mt-2">{isLogin ? '登入以繼續使用' : '註冊新帳號'}</p>
             </div>
 
@@ -304,6 +319,7 @@
     // ==========================================
     function MainApp({ appUser, onLogout, showMessage }) {
       const isAdmin = appUser.role === 'admin';
+      const canDeleteStale = isAdmin || appUser.canClearStale;
       
       // 資料狀態
       const [bossTemplates, setBossTemplates] = useState([]);
@@ -318,9 +334,7 @@
       const [adminTab, setAdminTab] = useState('home'); // 'home' | 'boss' | 'users'
       const [showPwdModal, setShowPwdModal] = useState(false);
       const [newPwd, setNewPwd] = useState('');
-      
-      // 自訂確認視窗狀態 (取代 window.confirm)
-      const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
+      const [patrolModalData, setPatrolModalData] = useState(null); // 控制巡邏紀錄視窗
       
       // 個人釘選狀態 (存在 LocalStorage)
       const [pinnedBosses, setPinnedBosses] = useState(() => {
@@ -349,18 +363,6 @@
       const [isReporting, setIsReporting] = useState(false);
       const [isResettingGlobal, setIsResettingGlobal] = useState(false);
       const [globalBaseTime, setGlobalBaseTime] = useState(''); // 管理員自訂基準時間
-
-      // 呼叫確認視窗的輔助函式
-      const requestConfirm = (message, onConfirmCallback) => {
-        setConfirmDialog({
-            isOpen: true,
-            message,
-            onConfirm: () => {
-                setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
-                onConfirmCallback();
-            }
-        });
-      };
 
       // --- 計時器 Setup ---
       useEffect(() => {
@@ -600,38 +602,30 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
       };
 
-      // 替換原本的 window.confirm 為 requestConfirm
       const handleDeleteTemplate = async (templateId) => {
-        requestConfirm("確定要刪除這個種類嗎？", async () => {
-          try { await deleteDoc(doc(db, 'bossTemplates', templateId)); showMessage("刪除成功", "success"); } 
-          catch (error) { showMessage("刪除失敗", "error"); }
-        });
+        if (!window.confirm("確定要刪除這個種類嗎？")) return;
+        try { await deleteDoc(doc(db, 'bossTemplates', templateId)); showMessage("刪除成功", "success"); } catch (error) { showMessage("刪除失敗", "error"); }
       };
 
-      // 替換原本的 window.confirm 為 requestConfirm
       const handleDeleteActiveBoss = async (activeId) => {
-        requestConfirm("確定要手動刪除這筆分流計時紀錄嗎？", async () => {
-          try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } 
-          catch(e) { showMessage("刪除失敗", "error"); }
-        });
+        if (!window.confirm("確定要手動刪除這筆分流計時紀錄嗎？")) return;
+        try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } catch(e) { showMessage("刪除失敗", "error"); }
       };
 
-      // 替換原本的 window.confirm 為 requestConfirm
       const handleResetAllBosses = async () => {
-        requestConfirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(將使用您輸入的基準時間計算)", async () => {
-          try {
-            setIsResettingGlobal(true);
-            const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
-            const activeSnap = await getDocs(collection(db, 'activeBosses'));
-            await Promise.all(activeSnap.docs.map(d => deleteDoc(d.ref)));
-            await Promise.all(bossTemplates.map(t => updateDoc(doc(db, 'bossTemplates', t.id), { 
-              globalNextSpawn: baseTime + ((t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
-              globalMaxSpawn: baseTime + ((t.maxCooldown || t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
-              globalIsAlive: false 
-            })));
-            showMessage("全伺服器王重生時間已重置！", "success");
-          } catch (error) { showMessage("全域重置失敗", "error"); } finally { setIsResettingGlobal(false); }
-        });
+        if (!window.confirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(將使用您輸入的基準時間計算)")) return;
+        try {
+          setIsResettingGlobal(true);
+          const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
+          const activeSnap = await getDocs(collection(db, 'activeBosses'));
+          await Promise.all(activeSnap.docs.map(d => deleteDoc(d.ref)));
+          await Promise.all(bossTemplates.map(t => updateDoc(doc(db, 'bossTemplates', t.id), { 
+            globalNextSpawn: baseTime + ((t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
+            globalMaxSpawn: baseTime + ((t.maxCooldown || t.minCooldown || t.cooldownMinutes) * 60 * 1000), 
+            globalIsAlive: false 
+          })));
+          showMessage("全伺服器王重生時間已重置！", "success");
+        } catch (error) { showMessage("全域重置失敗", "error"); } finally { setIsResettingGlobal(false); }
       };
 
       const handleGlobalResetSingle = async (template) => {
@@ -663,7 +657,8 @@
           const minCD = template.minCooldown || template.cooldownMinutes || 60;
           const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
           await setDoc(doc(db, 'activeBosses', activeBossId), {
-            templateId: template.id, bossName: template.name, channel: channelInput.trim(), cooldownMinutes: minCD, maxCooldown: maxCD, lastKilled: killTime, nextSpawn: killTime + (minCD * 60 * 1000), maxSpawn: killTime + (maxCD * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username
+            templateId: template.id, bossName: template.name, channel: channelInput.trim(), cooldownMinutes: minCD, maxCooldown: maxCD, lastKilled: killTime, nextSpawn: killTime + (minCD * 60 * 1000), maxSpawn: killTime + (maxCD * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username,
+            patrolHistory: []
           });
           setChannelInput(''); showMessage(`已成功回報 ${template.name} (${channelInput.trim()}頻)`, "success");
         } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
@@ -679,7 +674,8 @@
           const minCD = template.minCooldown || template.cooldownMinutes || 60;
           const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
           await setDoc(doc(db, 'activeBosses', activeBossId), {
-            templateId: template.id, bossName: template.name, channel: modalChannelInput.trim(), cooldownMinutes: minCD, maxCooldown: maxCD, lastKilled: killTime, nextSpawn: killTime + (minCD * 60 * 1000), maxSpawn: killTime + (maxCD * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username
+            templateId: template.id, bossName: template.name, channel: modalChannelInput.trim(), cooldownMinutes: minCD, maxCooldown: maxCD, lastKilled: killTime, nextSpawn: killTime + (minCD * 60 * 1000), maxSpawn: killTime + (maxCD * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username,
+            patrolHistory: []
           });
           setModalChannelInput('');
           showMessage(`已成功回報 ${template.name} (${modalChannelInput.trim()}頻)`, "success");
@@ -700,7 +696,10 @@
             nextSpawn: killTime + (minCD * 60 * 1000),
             maxSpawn: killTime + (maxCD * 60 * 1000),
             reportedBy: appUser.id,
-            reporterName: appUser.username
+            reporterName: appUser.username,
+            lastCheckedAt: null,
+            lastCheckedByName: null,
+            patrolHistory: []
           });
           showMessage(`已重新登記 ${template.name} (${active.channel}頻) 擊殺`, "success");
         } catch (e) {
@@ -708,8 +707,24 @@
         }
       };
 
+      const handleCheckChannel = async (active) => {
+        try {
+          const currentHistory = active.patrolHistory || [];
+          const newRecord = { time: Date.now(), userName: appUser.username };
+          const newHistory = [newRecord, ...currentHistory].slice(0, 3);
+          
+          await updateDoc(doc(db, 'activeBosses', active.id), {
+            lastCheckedAt: Date.now(),
+            lastCheckedByName: appUser.username,
+            patrolHistory: newHistory
+          });
+          showMessage(`已記錄 ${active.channel}頻 巡邏簽到`, "success");
+        } catch (e) {
+          showMessage("記錄失敗，請確認權限", "error");
+        }
+      };
+
       // --- 管理員：一鍵清除該王確定重生超過 4 小時的紀錄 ---
-      // 替換原本的 window.confirm 為 requestConfirm
       const handleClearStaleRecords = async (group) => {
         const FOUR_HOURS = 4 * 60 * 60 * 1000;
         const staleRecords = group.channels.filter(ch => {
@@ -722,17 +737,17 @@
           return;
         }
 
-        requestConfirm(`確定要清除 ${staleRecords.length} 筆「確定重生」已超過 4 小時的分流紀錄嗎？`, async () => {
-          try {
-            setIsReporting(true);
-            await Promise.all(staleRecords.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
-            showMessage(`已成功清除 ${staleRecords.length} 筆過期紀錄`, 'success');
-          } catch (error) {
-            showMessage("清除失敗，請確認權限", "error");
-          } finally {
-            setIsReporting(false);
-          }
-        });
+        if (!window.confirm(`確定要清除 ${staleRecords.length} 筆「確定重生」已超過 4 小時的分流紀錄嗎？`)) return;
+
+        try {
+          setIsReporting(true);
+          await Promise.all(staleRecords.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
+          showMessage(`已成功清除 ${staleRecords.length} 筆過期紀錄`, 'success');
+        } catch (error) {
+          showMessage("清除失敗，請確認權限", "error");
+        } finally {
+          setIsReporting(false);
+        }
       };
 
       const formatCountdown = (nextSpawnTime, maxSpawnTime) => {
@@ -760,23 +775,6 @@
       return (
         <div className="p-4 md:p-8 font-sans">
           
-          {/* 自訂確認 Modal (取代 window.confirm) */}
-          {confirmDialog.isOpen && (
-            <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 animate-in fade-in">
-              <div className="bg-gray-800 p-6 rounded-2xl border border-gray-700 w-full max-w-sm shadow-2xl">
-                <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                   <ShieldAlert className="w-5 h-5 text-yellow-500" />
-                   確認操作
-                </h3>
-                <p className="text-gray-300 mb-6 whitespace-pre-line leading-relaxed">{confirmDialog.message}</p>
-                <div className="flex gap-3">
-                  <button onClick={() => setConfirmDialog({ isOpen: false, message: '', onConfirm: null })} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-2.5 rounded-xl transition-colors">取消</button>
-                  <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-medium py-2.5 rounded-xl transition-colors">確定</button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* 修改密碼 Modal */}
           {showPwdModal && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-in fade-in">
@@ -793,6 +791,49 @@
               </div>
             </div>
           )}
+
+          {patrolModalData && (() => {
+            const active = activeBosses.find(b => b.id === patrolModalData.id) || patrolModalData;
+            const history = active.patrolHistory || [];
+            return (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 animate-in fade-in" onClick={() => setPatrolModalData(null)}>
+                <div className="bg-gray-800 p-6 rounded-2xl border border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.15)] flex flex-col items-center gap-4 w-full max-w-[280px] animate-in zoom-in-95 duration-200" onClick={e=>e.stopPropagation()}>
+                   <div className="w-14 h-14 bg-purple-900/40 rounded-full flex items-center justify-center mb-1">
+                     <Search className="w-7 h-7 text-purple-400" />
+                   </div>
+                   <h4 className="font-bold text-white text-xl tracking-wide">{active.channel}頻 巡邏狀態</h4>
+                   
+                   <div className="w-full bg-gray-900 rounded-xl p-4 text-sm text-gray-300 space-y-2 border border-gray-700">
+                      <div className="text-xs text-gray-500 mb-2 border-b border-gray-800 pb-1">最近 3 筆巡邏紀錄</div>
+                      {history.length === 0 ? (
+                         <div className="text-center py-3 text-gray-500 text-xs">尚未有巡邏紀錄</div>
+                      ) : (
+                         history.map((record, idx) => (
+                           <div key={idx} className="flex justify-between items-center py-1">
+                              <span className="font-medium text-gray-300 flex items-center gap-1.5">
+                                 <Clock className="w-3.5 h-3.5 text-purple-500/70" />
+                                 {new Date(record.time).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})}
+                              </span>
+                              <span className="font-medium text-purple-300 max-w-[110px] truncate" title={record.userName}>
+                                 {record.userName}
+                              </span>
+                           </div>
+                         ))
+                      )}
+                   </div>
+
+                   <div className="w-full flex flex-col gap-2 mt-2">
+                     <button onClick={() => handleCheckChannel(active)} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl transition-colors font-bold shadow-lg shadow-purple-900/20">
+                        在此分流簽到
+                     </button>
+                     <button onClick={() => setPatrolModalData(null)} className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-xl transition-colors font-medium">
+                        關閉視窗
+                     </button>
+                   </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* BOSS 詳細資訊 Modal */}
           {activeModalBossId && (() => {
@@ -865,7 +906,7 @@
                         </div>
                       </div>
                       
-                      {(isAdmin || appUser.canClearStale) && group.channels.length > 0 && (
+                      {canDeleteStale && group.channels.length > 0 && (
                         <button onClick={() => handleClearStaleRecords(group)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50">
                           <Trash2 className="w-3.5 h-3.5" /> 清除過期 (4hr+)
                         </button>
@@ -921,7 +962,7 @@
                               <div key={active.id} className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border relative transition-all duration-300 overflow-hidden ${isSpawned ? 'bg-green-500/10 border-green-500/30' : isFloating ? 'bg-yellow-500/10 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-gray-800 border-gray-700'}`}>
                                 {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
                                 
-                                <div className="flex items-center gap-2 sm:gap-3 relative z-10 w-full max-w-[50%]">
+                                <div className="flex items-center gap-2 sm:gap-3 relative z-10 flex-1 min-w-0">
                                   <div className={`flex items-center justify-center border rounded-lg px-2 sm:px-3 py-1.5 min-w-[3rem] sm:min-w-[4.5rem] shrink-0 ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : 'bg-gray-900 border-gray-600'}`}>
                                     <div className={`font-bold leading-none flex items-baseline justify-center ${isSpawned ? 'text-green-400' : isFloating ? 'text-yellow-400' : isWarning ? 'text-red-400' : 'text-blue-400'}`}>
                                       <span className="text-[15px] sm:text-lg">{active.channel}</span>
@@ -935,20 +976,21 @@
                                     </span>
                                   </div>
                                 </div>
-                                <div className="flex items-center justify-end gap-1.5 sm:gap-3 relative z-10">
+                                <div className="flex items-center justify-end gap-1 sm:gap-1.5 relative z-10 shrink-0 ml-1">
                                   {isWarning && <Flame className="w-4 h-4 sm:w-5 sm:h-5 text-red-500 animate-bounce" />}
                                   
                                   {isSpawned ? (
-                                    <div className="flex items-center gap-1.5 sm:gap-2">
-                                      <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap">擊殺</button>
-                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap">無王</button>
+                                    <div className="flex items-center gap-1 sm:gap-1.5">
+                                      <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="p-1 sm:p-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm sm:text-base transition-colors flex items-center justify-center" title="擊殺">⚔️</button>
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className="px-2 sm:px-2.5 py-1 sm:py-1.5 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap">無王</button>
                                     </div>
                                   ) : isFloating ? (
-                                    <div className="flex items-center gap-1.5 sm:gap-2">
+                                    <div className="flex items-center gap-1 sm:gap-1.5">
                                       <span className="font-mono tracking-wide text-yellow-400 font-bold drop-shadow-[0_0_8px_rgba(250,204,21,0.4)] mr-1 text-xs sm:text-base">
                                         {timeText}
                                       </span>
-                                      <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap">擊殺</button>
+                                      <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="p-1 sm:p-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-sm sm:text-base transition-colors flex items-center justify-center" title="擊殺">⚔️</button>
+                                      <button onClick={(e) => { e.stopPropagation(); setPatrolModalData(active); }} className="p-1 sm:p-1.5 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-500/30 rounded-lg transition-colors flex items-center justify-center" title="開啟巡邏視窗"><Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
                                     </div>
                                   ) : (
                                     <span className={`font-mono font-medium tracking-wide text-xs sm:text-base ${isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
@@ -957,8 +999,8 @@
                                   )}
 
                                   {canDelete && !isSpawned && (
-                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1.5 rounded-lg transition-colors border border-transparent ml-1 ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
-                                      <Trash2 className="w-4 h-4" />
+                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className={`p-1 rounded transition-colors border border-transparent ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
+                                      <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                     </button>
                                   )}
                                 </div>
@@ -990,7 +1032,7 @@
                   <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時</h1>
+                  <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時器</h1>
                   <p className="text-gray-400 text-sm mt-1">目前身份：<span className={isAdmin ? 'text-purple-400 font-bold' : 'text-green-400 font-bold'}>{isAdmin ? '管理員' : '一般會員'}</span></p>
                 </div>
               </div>
@@ -1129,7 +1171,7 @@
                        allUsers.length === 0 ? (
                          <p className="text-gray-500 text-center py-6">目前尚無其他會員。</p>
                        ) : (
-                         allUsers.map(u => <AdminUserRow key={u.id} user={u} appUser={appUser} showMessage={showMessage} requestConfirm={requestConfirm} />)
+                         allUsers.map(u => <AdminUserRow key={u.id} user={u} appUser={appUser} showMessage={showMessage} />)
                        )
                      )}
                   </div>
