@@ -64,30 +64,6 @@
     import { Clock, History, Activity, Plus, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff } from 'lucide-react';
 
     // ==========================================
-    // 0. 自訂 Confirm 視窗 (取代 iframe 容易被阻擋的 window.confirm)
-    // ==========================================
-    window.customConfirm = function(message) {
-      return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.className = 'fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in';
-        const box = document.createElement('div');
-        box.className = 'bg-gray-800 p-6 rounded-2xl border border-gray-700 w-full max-w-sm shadow-2xl flex flex-col gap-4';
-        box.innerHTML = `
-          <h3 class="text-xl font-bold text-white mb-2 flex items-center gap-2">⚠️ 系統確認</h3>
-          <p class="text-gray-300 text-sm mb-4 whitespace-pre-wrap">${message}</p>
-          <div class="flex gap-3 mt-2">
-            <button id="custom-confirm-cancel" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-2.5 rounded-xl transition-colors">取消</button>
-            <button id="custom-confirm-ok" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-medium py-2.5 rounded-xl transition-colors">確定</button>
-          </div>
-        `;
-        overlay.onclick = (e) => { if(e.target === overlay) { document.body.removeChild(overlay); resolve(false); } };
-        document.body.appendChild(overlay);
-        document.getElementById('custom-confirm-cancel').onclick = () => { document.body.removeChild(overlay); resolve(false); };
-        document.getElementById('custom-confirm-ok').onclick = () => { document.body.removeChild(overlay); resolve(true); };
-      });
-    };
-
-    // ==========================================
     // 1. Firebase 初始化設定
     // ==========================================
     const firebaseConfig = {
@@ -137,7 +113,7 @@
 
       const handleDeleteUser = async () => {
         if (isSelf) return showMessage('無法刪除自己的帳號', 'error');
-        if (!(await window.customConfirm(`確定要永久刪除會員「${user.username}」嗎？此操作無法還原。`))) return;
+        if (!window.confirm(`確定要永久刪除會員「${user.username}」嗎？此操作無法還原。`)) return;
         try {
           await deleteDoc(doc(db, 'users', user.id));
           showMessage(`已刪除會員 ${user.username}`, 'success');
@@ -351,9 +327,6 @@
       const [allUsers, setAllUsers] = useState([]); 
       const [now, setNow] = useState(Date.now());
       
-      // 休眠機制狀態 (新增)
-      const [isIdle, setIsIdle] = useState(false);
-      
       // UI 狀態
       const [activeModalBossId, setActiveModalBossId] = useState(null); 
       const [modalPage, setModalPage] = useState(1); 
@@ -397,48 +370,6 @@
       const [isReporting, setIsReporting] = useState(false);
       const [isResettingGlobal, setIsResettingGlobal] = useState(false);
       const [globalBaseTime, setGlobalBaseTime] = useState(''); 
-
-      // --- 休眠機制偵測 (節省龐大流量) ---
-      useEffect(() => {
-        let timeoutId;
-        const IDLE_TIME = 3 * 60 * 1000; // 3分鐘沒動作就休眠
-
-        const resetIdleTimer = () => {
-          if (isIdle) setIsIdle(false); // 喚醒
-          clearTimeout(timeoutId);
-          // 重新倒數
-          timeoutId = setTimeout(() => {
-            setIsIdle(true);
-          }, IDLE_TIME);
-        };
-
-        const handleVisibilityChange = () => {
-          // 如果切換瀏覽器分頁，直接休眠 (超級省流量！)
-          if (document.hidden) {
-            setIsIdle(true);
-          } else {
-            resetIdleTimer();
-          }
-        };
-
-        // 監聽各種使用者互動
-        window.addEventListener('mousemove', resetIdleTimer);
-        window.addEventListener('keydown', resetIdleTimer);
-        window.addEventListener('touchstart', resetIdleTimer);
-        window.addEventListener('scroll', resetIdleTimer);
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        resetIdleTimer(); // 初始化啟動
-
-        return () => {
-          clearTimeout(timeoutId);
-          window.removeEventListener('mousemove', resetIdleTimer);
-          window.removeEventListener('keydown', resetIdleTimer);
-          window.removeEventListener('touchstart', resetIdleTimer);
-          window.removeEventListener('scroll', resetIdleTimer);
-          document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-      }, [isIdle]);
 
       // 解析使用者輸入的時間字串成時間戳記 (包含防未來時間邏輯)
       const parseKillTime = (timeStr, dateOption) => {
@@ -491,36 +422,21 @@
         }
       }, [activeModalBossId]);
 
-      // --- 資料庫監聽 (加上休眠判斷與過濾) ---
+      // --- 資料庫監聽 ---
       useEffect(() => {
-        // 如果處於休眠狀態，直接 return 不做任何監聽，徹底切斷連線省流量
-        if (isIdle) return;
-
         const unsubscribeTemplates = onSnapshot(collection(db, 'bossTemplates'), (snapshot) => {
           const templatesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
           setBossTemplates(templatesData);
         });
 
-        // 加入時間過濾：只抓取 maxSpawn (最晚重生時間) 是在「過去24小時內」到「未來」的紀錄。
-        // 這樣可以避免載入好幾天前忘記刪除的死資料，大幅降低初始讀取量！
-        const yesterday = Date.now() - (24 * 60 * 60 * 1000);
-        const activeQ = query(collection(db, 'activeBosses'), where('maxSpawn', '>=', yesterday));
-
-        const unsubscribeActive = onSnapshot(activeQ, (snapshot) => {
+        const unsubscribeActive = onSnapshot(collection(db, 'activeBosses'), (snapshot) => {
           const activeData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
           setActiveBosses(activeData);
         });
 
-        return () => {
-          unsubscribeTemplates();
-          unsubscribeActive();
-        };
-      }, [isIdle]); // 將 isIdle 加入依賴，醒來時會自動重新連接
-
-      // --- 管理員專用：按需載入會員列表 (不再全時監聽) ---
-      useEffect(() => {
-        if (isAdmin && adminTab === 'users' && showUserList) {
-          getDocs(collection(db, 'users')).then((snapshot) => {
+        let unsubscribeUsers = () => {};
+        if (isAdmin) {
+          unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
             const usersData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             usersData.sort((a, b) => {
               if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
@@ -529,7 +445,13 @@
             setAllUsers(usersData);
           });
         }
-      }, [isAdmin, adminTab, showUserList]); // 只有切換到會員頁面時才拉取資料
+
+        return () => {
+          unsubscribeTemplates();
+          unsubscribeActive();
+          unsubscribeUsers();
+        };
+      }, [isAdmin]);
 
       // --- 輔助資料與邏輯 ---
       const templateMap = useMemo(() => {
@@ -702,17 +624,17 @@
       };
 
       const handleDeleteTemplate = async (templateId) => {
-        if (!(await window.customConfirm("確定要刪除這個種類嗎？"))) return;
+        if (!window.confirm("確定要刪除這個種類嗎？")) return;
         try { await deleteDoc(doc(db, 'bossTemplates', templateId)); showMessage("刪除成功", "success"); } catch (error) { showMessage("刪除失敗", "error"); }
       };
 
       const handleDeleteActiveBoss = async (activeId) => {
-        if (!(await window.customConfirm("確定要手動刪除這筆分流計時紀錄嗎？"))) return;
+        if (!window.confirm("確定要手動刪除這筆分流計時紀錄嗎？")) return;
         try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } catch(e) { showMessage("刪除失敗", "error"); }
       };
 
       const handleResetAllBosses = async () => {
-        if (!(await window.customConfirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(將使用您輸入的基準時間計算)"))) return;
+        if (!window.confirm("【警告】確定要重置所有王的計算時間，並清除目前所有的分流紀錄嗎？\n(將使用您輸入的基準時間計算)")) return;
         try {
           setIsResettingGlobal(true);
           const baseTime = globalBaseTime ? new Date(globalBaseTime).getTime() : Date.now();
@@ -864,7 +786,7 @@
           return;
         }
 
-        if (!(await window.customConfirm(`確定要清除 ${staleRecords.length} 筆「確定重生」已超過 4 小時的分流紀錄嗎？`))) return;
+        if (!window.confirm(`確定要清除 ${staleRecords.length} 筆「確定重生」已超過 4 小時的分流紀錄嗎？`)) return;
 
         try {
           setIsReporting(true);
@@ -902,20 +824,6 @@
       return (
         <div className="p-4 md:p-8 font-sans">
           
-          {/* 休眠遮罩層 (點擊任意處喚醒) */}
-          {isIdle && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center cursor-pointer animate-in fade-in duration-500" onClick={() => setIsIdle(false)}>
-              <div className="bg-gray-800/90 p-8 rounded-3xl border border-gray-600 shadow-2xl flex flex-col items-center text-center">
-                <Clock className="w-16 h-16 text-blue-400 mb-4 animate-pulse" />
-                <h2 className="text-2xl font-bold text-white mb-2">系統已休眠</h2>
-                <p className="text-gray-300">為節省伺服器資源，系統已暫停連線。<br/>請點擊畫面任意處喚醒並同步最新時間。</p>
-                <button className="mt-6 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl transition-all shadow-lg shadow-blue-900/30">
-                  點擊喚醒
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* 修改密碼 Modal */}
           {showPwdModal && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-in fade-in" onClick={() => setShowPwdModal(false)}>
@@ -1080,16 +988,18 @@
                     {group.effectiveGlobalSpawn !== null && (() => {
                       const { text: globalText, state: globalState } = formatCountdown(group.effectiveGlobalSpawn, group.effectiveGlobalMaxSpawn);
                       return (
-                      <div className={`flex items-center justify-between p-1.5 sm:p-2 rounded-lg border relative overflow-hidden shrink-0 ${globalState === 'spawned' ? 'bg-green-500/10 border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : globalState === 'floating' ? 'bg-yellow-900/20 border-yellow-500/30' : 'bg-purple-900/20 border-purple-500/30'}`}>
-                        <div className="flex items-center gap-2 relative z-10 min-w-0">
-                          <div className={`flex items-center gap-1.5 border rounded px-1.5 sm:px-2 py-0.5 shrink-0 ${globalState === 'spawned' ? 'bg-green-900/50 border-green-500/50' : globalState === 'floating' ? 'bg-yellow-900/50 border-yellow-500/50' : 'bg-purple-900/50 border-purple-500/50'}`}>
-                            <Server className={`w-3 h-3 ${globalState === 'spawned' ? 'text-green-400' : globalState === 'floating' ? 'text-yellow-400' : 'text-purple-400'}`} />
-                            <span className={`font-bold text-[10px] sm:text-[11px] ${globalState === 'spawned' ? 'text-green-300' : globalState === 'floating' ? 'text-yellow-300' : 'text-purple-300'}`}>全伺服器</span>
+                      <div className={`flex items-center justify-between p-2.5 sm:p-3 rounded-lg border relative overflow-hidden shrink-0 ${globalState === 'spawned' ? 'bg-green-500/10 border-green-500/40 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : globalState === 'floating' ? 'bg-yellow-900/20 border-yellow-500/40' : 'bg-purple-900/20 border-purple-500/40'}`}>
+                        <div className="flex items-center gap-3 relative z-10">
+                          <div className={`flex flex-col items-center justify-center border rounded-md px-2 sm:px-3 py-1 min-w-[4rem] ${globalState === 'spawned' ? 'bg-green-900/50 border-green-500/50' : globalState === 'floating' ? 'bg-yellow-900/50 border-yellow-500/50' : 'bg-purple-900/50 border-purple-500/50'}`}>
+                            <Server className={`w-3.5 h-3.5 mb-0.5 ${globalState === 'spawned' ? 'text-green-400' : globalState === 'floating' ? 'text-yellow-400' : 'text-purple-400'}`} />
+                            <span className={`font-bold text-[10px] sm:text-xs leading-tight ${globalState === 'spawned' ? 'text-green-300' : globalState === 'floating' ? 'text-yellow-300' : 'text-purple-300'}`}>全伺服器</span>
                           </div>
-                          <span className="text-[10px] sm:text-xs text-gray-400 truncate">系統維修 / 全域計時</span>
+                          <div className="text-[11px] sm:text-xs text-gray-400 flex flex-col gap-1">
+                            <span className="text-gray-300 tracking-wide">系統維修 / 全域計時</span>
+                          </div>
                         </div>
-                        <div className="flex items-center relative z-10 shrink-0 ml-2">
-                          <span className={`font-mono font-medium tracking-wide text-[11px] sm:text-sm ${globalState === 'spawned' ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]' : globalState === 'floating' ? 'text-yellow-400' : 'text-purple-400'}`}>
+                        <div className="flex items-center gap-3 relative z-10">
+                          <span className={`font-mono font-medium tracking-wide text-xs sm:text-sm ${globalState === 'spawned' ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]' : globalState === 'floating' ? 'text-yellow-400' : 'text-purple-400'}`}>
                             {globalText}
                           </span>
                         </div>
@@ -1388,55 +1298,45 @@
                       系統目前尚未設定任何 BOSS 種類。
                     </div>
                   ) : (
-                    <form onSubmit={handleReportKill} className="grid grid-cols-12 gap-3 sm:gap-4 items-end">
-                      
-                      {/* 1. 搜尋王 */}
-                      <div className="col-span-12 md:col-span-4 xl:col-span-2">
+                    <form onSubmit={handleReportKill} className="flex flex-col lg:flex-row gap-3 items-end">
+                      <div className="w-full lg:w-40 xl:w-48 shrink-0">
                         <label className="block text-sm text-gray-400 mb-1">搜尋王</label>
                         <div className="relative">
                           <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
                           <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="輸入關鍵字..." className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
                         </div>
                       </div>
-
-                      {/* 2. 選擇 BOSS */}
-                      <div className="col-span-12 md:col-span-8 xl:col-span-3">
+                      <div className="flex-1 w-full min-w-[200px]">
                         <label className="block text-sm text-gray-400 mb-1">選擇 BOSS</label>
                         <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" required>
                           {filteredTemplates.length > 0 ? filteredTemplates.map(t => <option key={t.id} value={t.id}>{t.name} {t.level ? `Lv.${t.level}` : ''} (CD: {t.minCooldown || t.cooldownMinutes}{t.maxCooldown && t.maxCooldown !== (t.minCooldown || t.cooldownMinutes) ? `~${t.maxCooldown}` : ''}分)</option>) : <option value="">找不到符合的王</option>}
                         </select>
                       </div>
-
-                      {/* 3. 分流 */}
-                      <div className="col-span-6 md:col-span-2 xl:col-span-1">
+                      <div className="w-full sm:w-1/3 lg:w-20 shrink-0">
                         <label className="block text-sm text-gray-400 mb-1">分流</label>
                         <input type="number" min="1" value={channelInput} onChange={(e) => setChannelInput(e.target.value)} placeholder="數字" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center" required />
                       </div>
-
-                      {/* 4. 備註 */}
-                      <div className="col-span-6 md:col-span-3 xl:col-span-2">
+                      <div className="w-full sm:w-1/3 lg:w-32 xl:w-40 shrink-0">
                         <label className="block text-sm text-gray-400 mb-1">備註 (選填)</label>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="掉落等..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
                       </div>
                       
-                      {/* 5. 日期與時間 */}
-                      <div className="col-span-12 md:col-span-5 xl:col-span-3 flex gap-2">
-                         <div className="w-[75px] sm:w-[85px] shrink-0">
+                      <div className="w-full sm:w-1/3 lg:w-auto shrink-0 flex gap-1">
+                         <div className="w-[70px] shrink-0">
                            <label className="block text-sm text-gray-400 mb-1">日期</label>
                            <select value={killDateSelect} onChange={e=>setKillDateSelect(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-1 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center">
                              <option value="today">今天</option>
                              <option value="yesterday">昨天</option>
                            </select>
                          </div>
-                         <div className="flex-1 min-w-0">
-                           <label className="block text-sm text-gray-400 mb-1 truncate">擊殺時間 (選填)</label>
+                         <div className="flex-1 shrink-0 relative">
+                           <label className="block text-sm text-gray-400 mb-1">擊殺時間 (選填)</label>
                            <input type="time" step="1" value={killTimeInput} onChange={(e) => setKillTimeInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 sm:px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] [color-scheme:dark]" title="若空白則預設為現在" />
                          </div>
                       </div>
 
-                      {/* 6. 按鈕 */}
-                      <div className="col-span-12 md:col-span-2 xl:col-span-1">
-                        <button type="submit" disabled={isReporting || !selectedTemplateId} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 h-[48px] sm:h-[52px] rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                      <div className="w-full lg:w-auto mt-2 lg:mt-0 shrink-0">
+                        <button type="submit" disabled={isReporting || !selectedTemplateId} className="w-full lg:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-3 h-[48px] sm:h-[52px] rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center shadow-lg shadow-blue-900/20 whitespace-nowrap">
                           {isReporting ? '處理中' : '開始倒數'}
                         </button>
                       </div>
