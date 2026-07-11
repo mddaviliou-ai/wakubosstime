@@ -658,7 +658,8 @@
           const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
           await setDoc(doc(db, 'activeBosses', activeBossId), {
             templateId: template.id, bossName: template.name, channel: channelInput.trim(), cooldownMinutes: minCD, maxCooldown: maxCD, lastKilled: killTime, nextSpawn: killTime + (minCD * 60 * 1000), maxSpawn: killTime + (maxCD * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username,
-            patrolHistory: []
+            patrolHistory: [],
+            isRekilled: false
           });
           setChannelInput(''); showMessage(`已成功回報 ${template.name} (${channelInput.trim()}頻)`, "success");
         } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
@@ -675,7 +676,8 @@
           const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
           await setDoc(doc(db, 'activeBosses', activeBossId), {
             templateId: template.id, bossName: template.name, channel: modalChannelInput.trim(), cooldownMinutes: minCD, maxCooldown: maxCD, lastKilled: killTime, nextSpawn: killTime + (minCD * 60 * 1000), maxSpawn: killTime + (maxCD * 60 * 1000), reportedBy: appUser.id, reporterName: appUser.username,
-            patrolHistory: []
+            patrolHistory: [],
+            isRekilled: false
           });
           setModalChannelInput('');
           showMessage(`已成功回報 ${template.name} (${modalChannelInput.trim()}頻)`, "success");
@@ -699,7 +701,8 @@
             reporterName: appUser.username,
             lastCheckedAt: null,
             lastCheckedByName: null,
-            patrolHistory: []
+            patrolHistory: [],
+            isRekilled: true
           });
           showMessage(`已重新登記 ${template.name} (${active.channel}頻) 擊殺`, "success");
         } catch (e) {
@@ -796,8 +799,8 @@
             const active = activeBosses.find(b => b.id === patrolModalData.id) || patrolModalData;
             const history = active.patrolHistory || [];
             return (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 animate-in fade-in" onClick={() => setPatrolModalData(null)}>
-                <div className="bg-gray-800 p-6 rounded-2xl border border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.15)] flex flex-col items-center gap-4 w-full max-w-[280px] animate-in zoom-in-95 duration-200" onClick={e=>e.stopPropagation()}>
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 animate-in fade-in">
+                <div className="bg-gray-800 p-6 rounded-2xl border border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.15)] flex flex-col items-center gap-4 w-full max-w-[280px] animate-in zoom-in-95 duration-200">
                    <div className="w-14 h-14 bg-purple-900/40 rounded-full flex items-center justify-center mb-1">
                      <Search className="w-7 h-7 text-purple-400" />
                    </div>
@@ -849,8 +852,8 @@
             }).length;
 
             return (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-in fade-in" onClick={() => setActiveModalBossId(null)}>
-                <div className="bg-gray-800 rounded-2xl border border-gray-700 w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-in fade-in">
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
                   
                   {/* Modal Header */}
                   <div className="p-4 sm:p-5 border-b border-gray-700 flex items-center justify-between bg-gray-800/80 rounded-t-2xl shrink-0">
@@ -898,11 +901,15 @@
                       <div className="flex flex-wrap items-center gap-4 bg-gray-900/40 p-2.5 rounded-xl border border-gray-700/50">
                         <div className="flex items-center gap-2 text-xs text-red-400 font-medium">
                           <div className="w-2.5 h-2.5 rounded-[3px] bg-red-900/80 border border-red-500/50"></div>
-                          預估10分鐘重生
+                          準備重生了
                         </div>
                         <div className="flex items-center gap-2 text-xs text-yellow-400 font-medium">
                           <div className="w-2.5 h-2.5 rounded-[3px] bg-yellow-900/80 border border-yellow-500/50"></div>
-                          時間內可能重生
+                          可能重生頻道
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-purple-400 font-medium">
+                          <div className="w-2.5 h-2.5 rounded-[3px] bg-purple-900/80 border border-purple-500/50"></div>
+                          再次擊殺頻道
                         </div>
                       </div>
                       
@@ -954,17 +961,18 @@
                             const isWarning = state === 'waiting' && (active.nextSpawn - now) <= 10 * 60 * 1000;
                             const isFloating = state === 'floating';
                             const isSpawned = state === 'spawned';
+                            const isRekilled = active.isRekilled === true;
                             
                             // 判斷是否可以刪除: 管理員 或 是自己回報的
                             const canDelete = isAdmin || active.reportedBy === appUser.id;
                             
                             return (
-                              <div key={active.id} className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border relative transition-all duration-300 overflow-hidden ${isSpawned ? 'bg-green-500/10 border-green-500/30' : isFloating ? 'bg-yellow-500/10 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-gray-800 border-gray-700'}`}>
+                              <div key={active.id} className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border relative transition-all duration-300 overflow-hidden ${isSpawned ? 'bg-green-500/10 border-green-500/30' : isFloating ? 'bg-yellow-500/10 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : isRekilled ? 'bg-purple-900/20 border-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.1)]' : 'bg-gray-800 border-gray-700'}`}>
                                 {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
                                 
                                 <div className="flex items-center gap-2 sm:gap-3 relative z-10 flex-1 min-w-0">
-                                  <div className={`flex items-center justify-center border rounded-lg px-2 sm:px-3 py-1.5 min-w-[3rem] sm:min-w-[4.5rem] shrink-0 ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : 'bg-gray-900 border-gray-600'}`}>
-                                    <div className={`font-bold leading-none flex items-baseline justify-center ${isSpawned ? 'text-green-400' : isFloating ? 'text-yellow-400' : isWarning ? 'text-red-400' : 'text-blue-400'}`}>
+                                  <div className={`flex items-center justify-center border rounded-lg px-2 sm:px-3 py-1.5 min-w-[3rem] sm:min-w-[4.5rem] shrink-0 ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : isRekilled ? 'bg-purple-900/50 border-purple-500/50' : 'bg-gray-900 border-gray-600'}`}>
+                                    <div className={`font-bold leading-none flex items-baseline justify-center ${isSpawned ? 'text-green-400' : isFloating ? 'text-yellow-400' : isWarning ? 'text-red-400' : isRekilled ? 'text-purple-400' : 'text-blue-400'}`}>
                                       <span className="text-[15px] sm:text-lg">{active.channel}</span>
                                     </div>
                                   </div>
@@ -993,7 +1001,7 @@
                                       <button onClick={(e) => { e.stopPropagation(); setPatrolModalData(active); }} className="p-1 sm:p-1.5 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-500/30 rounded-lg transition-colors flex items-center justify-center" title="開啟巡邏視窗"><Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
                                     </div>
                                   ) : (
-                                    <span className={`font-mono font-medium tracking-wide text-xs sm:text-base ${isWarning ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                                    <span className={`font-mono font-medium tracking-wide text-xs sm:text-base ${isWarning ? 'text-red-400 font-bold' : isRekilled ? 'text-purple-300' : 'text-gray-300'}`}>
                                       {timeText}
                                     </span>
                                   )}
@@ -1226,9 +1234,10 @@
                         <Clock className="w-6 h-6 text-yellow-500" />
                         各頻道 BOSS 狀態
                       </h2>
-                      <div className="flex items-center gap-3 text-[11px] font-medium text-gray-400 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1">
-                        <span className="flex items-center gap-1 text-red-400"><div className="w-2 h-2 rounded bg-red-500/80"></div> 10分內重生</span>
-                        <span className="flex items-center gap-1 text-yellow-400"><div className="w-2 h-2 rounded bg-yellow-500/80"></div> 可能重生</span>
+                      <div className="flex items-center gap-3 text-[11px] font-medium text-gray-400 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 flex-wrap">
+                        <span className="flex items-center gap-1 text-red-400"><div className="w-2 h-2 rounded bg-red-500/80"></div> 準備重生了</span>
+                        <span className="flex items-center gap-1 text-yellow-400"><div className="w-2 h-2 rounded bg-yellow-500/80"></div> 可能重生頻道</span>
+                        <span className="flex items-center gap-1 text-purple-400"><div className="w-2 h-2 rounded bg-purple-500/80"></div> 再次擊殺頻道</span>
                       </div>
                     </div>
                     <select value={bossSort} onChange={e=>setBossSort(e.target.value)} className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full sm:w-auto">
