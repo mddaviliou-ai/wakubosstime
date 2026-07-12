@@ -327,14 +327,14 @@
       const [uiTick, setUiTick] = useState(0);
       const [sysSettings, setSysSettings] = useState({ autoClearEnabled: false, autoClearHours: 4, autoClearInterval: 1 });
 
-      const [activeModalBossId, setActiveModalBossId] = useState(null); 
+      const [activeModalBossId, setActiveModalBossId] = useState(() => localStorage.getItem('wakuboss_active_modal') || null); 
       const [modalPage, setModalPage] = useState(1); 
       const [adminTab, setAdminTab] = useState('home'); 
       const [showPwdModal, setShowPwdModal] = useState(false);
       const [newPwd, setNewPwd] = useState('');
       const [patrolModalData, setPatrolModalData] = useState(null); 
       const [expandedMemoId, setExpandedMemoId] = useState(null); 
-      const [isReportFormCollapsed, setIsReportFormCollapsed] = useState(false);
+      const [isReportFormCollapsed, setIsReportFormCollapsed] = useState(() => localStorage.getItem('wakuboss_form_collapsed') === 'true');
       
       const [searchQuery, setSearchQuery] = useState('');
       const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -358,7 +358,7 @@
         return saved ? JSON.parse(saved) : {};
       });
 
-      const [bossSort, setBossSort] = useState('levelAsc'); 
+      const [bossSort, setBossSort] = useState(() => localStorage.getItem('wakuboss_sort') || 'levelAsc'); 
       const [adminSortOrder, setAdminSortOrder] = useState('levelDesc'); 
       const [newTemplateName, setNewTemplateName] = useState('');
       const [newTemplateLevel, setNewTemplateLevel] = useState('');
@@ -376,6 +376,20 @@
       const [globalBaseTime, setGlobalBaseTime] = useState(''); 
       const [staleClearHours, setStaleClearHours] = useState(4);
 
+      // 新增：監聽狀態變化並存入 localStorage (防止手機切背景被砍後重整)
+      useEffect(() => {
+        if (activeModalBossId) localStorage.setItem('wakuboss_active_modal', activeModalBossId);
+        else localStorage.removeItem('wakuboss_active_modal');
+      }, [activeModalBossId]);
+
+      useEffect(() => {
+        localStorage.setItem('wakuboss_sort', bossSort);
+      }, [bossSort]);
+
+      useEffect(() => {
+        localStorage.setItem('wakuboss_form_collapsed', isReportFormCollapsed);
+      }, [isReportFormCollapsed]);
+
       useEffect(() => {
         const timer = setInterval(() => setUiTick(t => t + 1), 1000);
         return () => clearInterval(timer);
@@ -391,12 +405,19 @@
           }, 30 * 60 * 1000);
         };
 
+        const handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible') {
+            resetIdleTimer();
+          }
+        };
+
         resetIdleTimer();
 
         window.addEventListener('mousedown', resetIdleTimer);
         window.addEventListener('keydown', resetIdleTimer);
         window.addEventListener('touchstart', resetIdleTimer);
         window.addEventListener('scroll', resetIdleTimer, true);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
           clearTimeout(idleTimer);
@@ -404,6 +425,7 @@
           window.removeEventListener('keydown', resetIdleTimer);
           window.removeEventListener('touchstart', resetIdleTimer);
           window.removeEventListener('scroll', resetIdleTimer, true);
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
       }, [isSleeping]);
 
@@ -764,7 +786,7 @@
           setChannelInput(''); 
           setMemoInput('');
           setKillTimeInput('');
-          setIsReportFormCollapsed(true); // 回報後自動收起表單
+          setIsReportFormCollapsed(true);
           showMessage(`已成功回報 ${template.name} (${channelInput.trim()}頻)`, "success");
         } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
       };
@@ -1211,6 +1233,7 @@
                             const canDelete = isAdmin || active.reportedBy === appUser.id;
                             const isExpanded = expandedMemoId === active.id;
                             
+                            // 修正邏輯：只要是浮動(黃)或重生(綠)區間，按鈕就會顯示，不會被再次擊殺(紫)的狀態擋住
                             const showActionButtons = (isFloating || isSpawned);
 
                             return (
@@ -1248,7 +1271,7 @@
                                   <div className="flex items-center justify-end gap-1 sm:gap-1.5 relative z-10 shrink-0 ml-1">
                                     {isWarning && <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-red-500 animate-bounce mr-1" />}
                                     
-                                    <span className={`text-[11px] sm:text-xs mr-1 ${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned ? 'text-purple-300' : 'text-gray-300'}`}>
+                                    <span className={`text-[11px] sm:text-xs mr-1 ${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300' : 'text-gray-300'}`}>
                                        <CountdownTimer nextSpawnTime={active.nextSpawn} maxSpawnTime={active.maxSpawn} />
                                     </span>
                                     
@@ -1754,10 +1777,14 @@
                setAppUser({ id: docSnap.id, ...data });
             }
           } else {
+            // 只有在明確確認文件不存在時才清空
             setAppUser(null);
             localStorage.removeItem('wakuboss_user_id');
           }
           setIsCheckingAuth(false);
+        }, (error) => {
+          console.warn("Auth 監聽暫時中斷或網路異常 (手機背景喚醒常見):", error);
+          // 加上錯誤捕捉，防止因為手機切換背景網路不穩導致被判定為異常而誤登出
         });
 
         return () => unsub();
