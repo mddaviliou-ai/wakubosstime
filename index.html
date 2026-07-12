@@ -78,7 +78,8 @@
         return () => clearInterval(timer);
       }, []);
 
-      if (!nextSpawnTime) return <span className="text-gray-400">未知</span>;
+      if (nextSpawnTime === null || nextSpawnTime === undefined || nextSpawnTime === '') return <span className="text-gray-400">未知</span>;
+      if (nextSpawnTime === 0) return <span className="font-mono tracking-wide text-green-400 font-bold drop-shadow-[0_0_5px_rgba(74,222,128,0.3)]">🟢 確定重生</span>;
       
       const diffMin = nextSpawnTime - now;
       const diffMax = (maxSpawnTime || nextSpawnTime) - now;
@@ -376,7 +377,7 @@
       const [globalBaseTime, setGlobalBaseTime] = useState(''); 
       const [staleClearHours, setStaleClearHours] = useState(4);
 
-      // 新增：監聽狀態變化並存入 localStorage (防止手機切背景被砍後重整)
+      // 手機背景保護與狀態儲存
       useEffect(() => {
         if (activeModalBossId) localStorage.setItem('wakuboss_active_modal', activeModalBossId);
         else localStorage.removeItem('wakuboss_active_modal');
@@ -1233,7 +1234,6 @@
                             const canDelete = isAdmin || active.reportedBy === appUser.id;
                             const isExpanded = expandedMemoId === active.id;
                             
-                            // 修正邏輯：只要是浮動(黃)或重生(綠)區間，按鈕就會顯示，不會被再次擊殺(紫)的狀態擋住
                             const showActionButtons = (isFloating || isSpawned);
 
                             return (
@@ -1704,8 +1704,11 @@
                           return diff > 0 && diff <= 10 * 60 * 1000;
                         }).length;
 
+                        // 判斷是否為全域重生狀態
+                        const isGlobalSpawned = group.effectiveGlobalSpawn === 0 || (group.effectiveGlobalMaxSpawn !== null && group.effectiveGlobalMaxSpawn <= currentNow);
+
                         return (
-                          <div key={group.id} onClick={() => setActiveModalBossId(group.id)} className={`bg-gray-800 rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer hover:scale-[1.01] active:scale-[0.99] relative ${warningCount > 0 ? 'border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : 'border-gray-700 hover:border-gray-500'} ${isPinned ? 'ring-1 ring-yellow-500/30 bg-gray-800/90' : ''}`}>
+                          <div key={group.id} onClick={() => setActiveModalBossId(group.id)} className={`bg-gray-800 rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer hover:scale-[1.01] active:scale-[0.99] relative ${warningCount > 0 ? 'border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : isGlobalSpawned && group.channels.length === 0 ? 'border-green-500/40 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-gray-700 hover:border-gray-500'} ${isPinned ? 'ring-1 ring-yellow-500/30 bg-gray-800/90' : ''}`}>
                             
                             <button onClick={(e) => togglePin(e, group.id)} className="absolute top-2 right-2 p-1.5 rounded-full bg-gray-900/50 hover:bg-gray-700 transition-colors z-20 group" title={isPinned ? "取消釘選" : "釘選置頂"}>
                                <Star className={`w-4 h-4 transition-all ${isPinned ? 'fill-yellow-500 text-yellow-500' : 'text-gray-500 group-hover:text-yellow-400'}`} />
@@ -1713,8 +1716,8 @@
 
                             <div className="p-4 sm:p-5 flex items-center justify-between select-none bg-gray-800 hover:bg-gray-750 transition-colors">
                               <div className="flex items-center gap-4">
-                                <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${warningCount > 0 ? 'border-red-500/40' : 'border-gray-700'}`}>
-                                  {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${warningCount > 0 ? 'text-red-400' : 'text-gray-500'}`} />}
+                                <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${warningCount > 0 ? 'border-red-500/40' : isGlobalSpawned && group.channels.length === 0 ? 'border-green-500/40' : 'border-gray-700'}`}>
+                                  {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${warningCount > 0 ? 'text-red-400' : isGlobalSpawned && group.channels.length === 0 ? 'text-green-400' : 'text-gray-500'}`} />}
                                 </div>
                                 <div>
                                   <h3 className="text-lg sm:text-xl font-bold text-white flex items-center flex-wrap gap-2 pr-6">
@@ -1777,14 +1780,12 @@
                setAppUser({ id: docSnap.id, ...data });
             }
           } else {
-            // 只有在明確確認文件不存在時才清空
             setAppUser(null);
             localStorage.removeItem('wakuboss_user_id');
           }
           setIsCheckingAuth(false);
         }, (error) => {
-          console.warn("Auth 監聽暫時中斷或網路異常 (手機背景喚醒常見):", error);
-          // 加上錯誤捕捉，防止因為手機切換背景網路不穩導致被判定為異常而誤登出
+          console.warn("Auth 監聽暫時中斷或網路異常:", error);
         });
 
         return () => unsub();
