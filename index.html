@@ -84,8 +84,7 @@
         return () => clearInterval(timer);
       }, []);
 
-      // 修正 Bug：嚴格檢查 null 或 undefined，因為全域重生時 nextSpawnTime 會是 0
-      if (nextSpawnTime === null || nextSpawnTime === undefined) return <span className="text-gray-400">未知</span>;
+      if (!nextSpawnTime) return <span className="text-gray-400">未知</span>;
       
       const diffMin = nextSpawnTime - now;
       const diffMax = (maxSpawnTime || nextSpawnTime) - now;
@@ -382,6 +381,9 @@
       const [newTemplateMinCD, setNewTemplateMinCD] = useState(60);
       const [newTemplateMaxCD, setNewTemplateMaxCD] = useState(60);
       const [newTemplateImage, setNewTemplateImage] = useState(null);
+      // 是否開啟巡邏功能
+      const [newTemplateEnablePatrol, setNewTemplateEnablePatrol] = useState(false);
+
       const [isAddingTemplate, setIsAddingTemplate] = useState(false);
       const [editingTemplateId, setEditingTemplateId] = useState(null);
       const [showBossForm, setShowBossForm] = useState(true);
@@ -425,13 +427,12 @@
         };
       }, [isSleeping]);
 
-      // --- 自動清除過期紀錄引擎 (修改為全體用戶共同執行) ---
+      // --- 自動清除過期紀錄引擎 (僅管理員背景執行) ---
       const activeBossesRef = useRef(activeBosses);
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
 
       useEffect(() => {
-        // 移除 isAdmin 限制，讓所有在線玩家都能幫忙清理
-        if (!sysSettings.autoClearEnabled || isSleeping) return;
+        if (!isAdmin || !sysSettings.autoClearEnabled || isSleeping) return;
         
         // 取得自訂的掃描頻率 (預設為 1 分鐘)，轉換為毫秒
         const checkIntervalMs = (sysSettings.autoClearInterval || 1) * 60 * 1000;
@@ -442,16 +443,13 @@
           activeBossesRef.current.forEach(active => {
             const spawnTime = active.maxSpawn || active.nextSpawn;
             if (now - spawnTime >= limitMs) {
-              // 加入 0~5 秒的隨機延遲，防止多名玩家在同一毫秒送出大量重複的刪除請求
-              setTimeout(() => {
-                deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
-              }, Math.random() * 5000);
+              deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
             }
           });
         }, checkIntervalMs); 
         
         return () => clearInterval(interval);
-      }, [sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
+      }, [isAdmin, sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
 
 
       // 解析使用者輸入的時間字串成時間戳記
@@ -670,7 +668,8 @@
             minCooldown: minCD,
             maxCooldown: maxCD,
             cooldownMinutes: minCD, 
-            imageUrl: newTemplateImage 
+            imageUrl: newTemplateImage,
+            enablePatrol: newTemplateEnablePatrol
           };
           if (editingTemplateId) {
             await updateDoc(doc(db, 'bossTemplates', editingTemplateId), templateData);
@@ -686,11 +685,11 @@
             });
             showMessage("種類新增成功", "success");
           }
-          setNewTemplateName(''); setNewTemplateLevel(''); setNewTemplateMinCD(60); setNewTemplateMaxCD(60); setNewTemplateImage(null);
+          setNewTemplateName(''); setNewTemplateLevel(''); setNewTemplateMinCD(60); setNewTemplateMaxCD(60); setNewTemplateImage(null); setNewTemplateEnablePatrol(false);
         } catch (error) { showMessage("儲存失敗", "error"); } finally { setIsAddingTemplate(false); }
       };
 
-      const handleCancelEdit = () => { setEditingTemplateId(null); setNewTemplateName(''); setNewTemplateLevel(''); setNewTemplateMinCD(60); setNewTemplateMaxCD(60); setNewTemplateImage(null); };
+      const handleCancelEdit = () => { setEditingTemplateId(null); setNewTemplateName(''); setNewTemplateLevel(''); setNewTemplateMinCD(60); setNewTemplateMaxCD(60); setNewTemplateImage(null); setNewTemplateEnablePatrol(false); };
 
       const handleEditClick = (template) => {
         setEditingTemplateId(template.id); 
@@ -699,6 +698,7 @@
         setNewTemplateMinCD(template.minCooldown || template.cooldownMinutes || 60);
         setNewTemplateMaxCD(template.maxCooldown || template.cooldownMinutes || 60);
         setNewTemplateImage(template.imageUrl || null);
+        setNewTemplateEnablePatrol(template.enablePatrol || false);
         setShowBossForm(true);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       };
@@ -1253,7 +1253,7 @@
                                           
                                           {isSpawned ? (
                                             <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id); }} className="h-6 sm:h-7 px-1.5 sm:px-2 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded text-[11px] sm:text-xs font-bold transition-colors flex items-center justify-center whitespace-nowrap shrink-0">無王</button>
-                                          ) : (
+                                          ) : group.enablePatrol ? (
                                             <button 
                                               onClick={(e) => { e.stopPropagation(); setPatrolModalData(active); }} 
                                               className="w-6 h-6 sm:w-7 sm:h-7 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-500/30 rounded transition-colors flex items-center justify-center relative shrink-0" 
@@ -1267,7 +1267,7 @@
                                                 </span>
                                               )}
                                             </button>
-                                          )}
+                                          ) : null}
                                       </div>
                                     )}
 
@@ -1394,10 +1394,16 @@
                               <label className="block text-sm text-gray-400 mb-1">最大CD(分)</label>
                               <input type="number" min="1" value={newTemplateMaxCD} onChange={(e) => setNewTemplateMaxCD(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" required />
                             </div>
+                            <div className="col-span-2 md:col-span-4 flex items-center mt-1">
+                              <label className="flex items-center gap-2.5 cursor-pointer bg-gray-800/50 px-3.5 py-2.5 rounded-lg border border-gray-700/50 hover:border-purple-500/50 transition-colors w-full sm:w-auto">
+                                <input type="checkbox" checked={newTemplateEnablePatrol} onChange={(e) => setNewTemplateEnablePatrol(e.target.checked)} className="w-4 h-4 accent-purple-500 rounded bg-gray-900 border-gray-600" />
+                                <span className="text-sm text-gray-300">開啟「巡邏簽到」功能 <span className="text-gray-500 text-xs ml-1">(浮動時間較長的王適用)</span></span>
+                              </label>
+                            </div>
                           </div>
                         </div>
                         
-                        <div className="flex items-center justify-end gap-2 border-t border-gray-800 pt-3">
+                        <div className="flex items-center justify-end gap-2 border-t border-gray-800 pt-3 mt-1">
                           {editingTemplateId && <button type="button" onClick={handleCancelEdit} className="bg-gray-700 hover:bg-gray-600 text-white font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center">取消</button>}
                           <button type="submit" disabled={isAddingTemplate} className="bg-purple-600 hover:bg-purple-500 text-white font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-900/20">
                             {isAddingTemplate ? <Activity className="w-5 h-5 animate-spin" /> : (editingTemplateId ? '儲存修改' : '新增種類')}
@@ -1425,7 +1431,7 @@
                                 <span className="font-bold text-gray-200">
                                   {template.name} {template.level && <span className="text-yellow-400 text-sm ml-1">Lv.{template.level}</span>}
                                 </span>
-                                <span className="text-gray-500 text-xs">CD: {template.minCooldown || template.cooldownMinutes}{template.maxCooldown && template.maxCooldown !== (template.minCooldown || template.cooldownMinutes) ? `~${template.maxCooldown}` : ''}分鐘</span>
+                                <span className="text-gray-500 text-xs">CD: {template.minCooldown || template.cooldownMinutes}{template.maxCooldown && template.maxCooldown !== (template.minCooldown || template.cooldownMinutes) ? `~${template.maxCooldown}` : ''}分鐘 {template.enablePatrol && <span className="text-purple-400 ml-1">· 🛡️ 啟用巡邏</span>}</span>
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
@@ -1464,7 +1470,7 @@
                     <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
                        <h3 className="text-lg font-bold text-green-400 mb-2 flex items-center gap-2"><Trash2 className="w-5 h-5"/> 自動清除過期紀錄</h3>
                        <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                         開啟此功能後，只要有任何一位<span className="text-white">用戶的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景協同檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
+                         開啟此功能後，只要有任何一位<span className="text-white">管理員的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
                          <span className="text-yellow-400 text-xs">注意：背景檢查是用網頁上的記憶體計算，消耗 0 次讀取量。此設定為全域同步。</span>
                        </p>
                        <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-gray-800 p-4 rounded-lg border border-gray-700">
