@@ -48,12 +48,12 @@
   <div id="root"></div>
 
   <script type="text/babel" data-type="module">
-    import React, { useState, useEffect, useMemo, memo } from 'react';
+    import React, { useState, useEffect, useMemo, memo, useRef } from 'react';
     import { createRoot } from 'react-dom/client';
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInAnonymously } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where } from 'firebase/firestore';
-    import { Clock, History, Activity, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff, Power, Ban, Moon } from 'lucide-react';
+    import { Clock, History, Activity, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff, Power, Ban, Moon, Settings } from 'lucide-react';
 
     // ==========================================
     // 1. Firebase 初始化設定 (請勿刪除)
@@ -344,6 +344,9 @@
       // 網頁休眠狀態
       const [isSleeping, setIsSleeping] = useState(false);
 
+      // 系統全域設定 (自動清除等)
+      const [sysSettings, setSysSettings] = useState({ autoClearEnabled: false, autoClearHours: 4, autoClearInterval: 1 });
+
       const [activeModalBossId, setActiveModalBossId] = useState(null); 
       const [modalPage, setModalPage] = useState(1); 
       const [adminTab, setAdminTab] = useState('home'); 
@@ -389,16 +392,15 @@
       useEffect(() => {
         let idleTimer;
         const resetIdleTimer = () => {
-          if (isSleeping) return; // 若已經在休眠，則不需重置計時器，需手動點擊喚醒
+          if (isSleeping) return; 
           clearTimeout(idleTimer);
           idleTimer = setTimeout(() => {
             setIsSleeping(true);
-          }, 30 * 60 * 1000); // 30分鐘無操作則進入休眠
+          }, 30 * 60 * 1000); 
         };
 
         resetIdleTimer();
 
-        // 監聽使用者操作 (排除 mousemove 以免純粹滑過被判定為操作)
         window.addEventListener('mousedown', resetIdleTimer);
         window.addEventListener('keydown', resetIdleTimer);
         window.addEventListener('touchstart', resetIdleTimer);
@@ -413,7 +415,32 @@
         };
       }, [isSleeping]);
 
-      // 解析使用者輸入的時間字串成時間戳記 (包含防未來時間邏輯)
+      // --- 自動清除過期紀錄引擎 (僅管理員背景執行) ---
+      const activeBossesRef = useRef(activeBosses);
+      useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
+
+      useEffect(() => {
+        if (!isAdmin || !sysSettings.autoClearEnabled || isSleeping) return;
+        
+        // 取得自訂的掃描頻率 (預設為 1 分鐘)，轉換為毫秒
+        const checkIntervalMs = (sysSettings.autoClearInterval || 1) * 60 * 1000;
+        
+        const interval = setInterval(() => {
+          const now = Date.now();
+          const limitMs = (sysSettings.autoClearHours || 4) * 60 * 60 * 1000;
+          activeBossesRef.current.forEach(active => {
+            const spawnTime = active.maxSpawn || active.nextSpawn;
+            if (now - spawnTime >= limitMs) {
+              deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
+            }
+          });
+        }, checkIntervalMs); 
+        
+        return () => clearInterval(interval);
+      }, [isAdmin, sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
+
+
+      // 解析使用者輸入的時間字串成時間戳記
       const parseKillTime = (timeStr, dateOption) => {
         if (!timeStr) return Date.now();
         const [hours, minutes, seconds = 0] = timeStr.split(':').map(Number);
@@ -455,7 +482,14 @@
 
       // --- 資料庫監聽 ---
       useEffect(() => {
-        if (isSleeping) return; // 休眠時不建立連線，節省 Firebase 流量與效能
+        if (isSleeping) return; 
+
+        // 監聽全域系統設定
+        const unsubSettings = onSnapshot(doc(db, 'settings', 'system'), (docSnap) => {
+          if (docSnap.exists()) {
+            setSysSettings(prev => ({ ...prev, ...docSnap.data() }));
+          }
+        });
 
         const unsubscribeTemplates = onSnapshot(collection(db, 'bossTemplates'), (snapshot) => {
           const templatesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -480,11 +514,12 @@
         }
 
         return () => {
+          unsubSettings();
           unsubscribeTemplates();
           unsubscribeActive();
           unsubscribeUsers();
         };
-      }, [isAdmin, isSleeping]); // 加入 isSleeping 依賴
+      }, [isAdmin, isSleeping]); 
 
       // --- 輔助資料與邏輯 ---
       const templateMap = useMemo(() => {
@@ -659,7 +694,7 @@
       };
 
       const handleDeleteActiveBoss = async (activeId) => {
-        requestConfirm("確定要手裁除這筆分流計時紀錄嗎？", async () => {
+        requestConfirm("確定要手動刪除這筆分流計時紀錄嗎？", async () => {
           try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } catch(e) { showMessage("刪除失敗", "error"); }
         });
       };
@@ -829,12 +864,21 @@
         });
       };
 
+      // --- 系統控制更新 ---
+      const handleUpdateSysSettings = async (newVals) => {
+        try {
+          await setDoc(doc(db, 'settings', 'system'), { ...sysSettings, ...newVals }, { merge: true });
+          showMessage('全域系統設定已更新', 'success');
+        } catch (e) {
+          showMessage('設定更新失敗，請確認權限', 'error');
+        }
+      };
+
       // 系統控制/踢人功能
       const handleSuspendAll = () => {
         requestConfirm("確定要將【所有非管理員的會員】設為停權(審核中)嗎？\n這將強制他們(包含舊版本)退回首頁並中斷對資料庫的監聽。", async () => {
           setIsReporting(true);
           try {
-            // 修復：改為排除角色為 'admin' 的用戶，確保管理員絕對不會被停權
             const targets = allUsers.filter(u => u.role !== 'admin' && u.status === 'approved');
             await Promise.all(targets.map(u => updateDoc(doc(db, 'users', u.id), { status: 'pending' })));
             showMessage(`已成功將 ${targets.length} 名會員轉為審核中`, "success");
@@ -1275,7 +1319,7 @@
                     )}
                   </button>
                   <button onClick={() => setAdminTab('system')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'system' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
-                    <Power className="w-4 h-4"/> 系統控制
+                    <Settings className="w-4 h-4"/> 系統控制
                   </button>
                 </div>
 
@@ -1394,6 +1438,60 @@
                   </div>
                 ) : adminTab === 'system' ? (
                   <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-6">
+                    
+                    {/* 自動清除設定區塊 */}
+                    <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
+                       <h3 className="text-lg font-bold text-green-400 mb-2 flex items-center gap-2"><Trash2 className="w-5 h-5"/> 自動清除過期紀錄</h3>
+                       <p className="text-sm text-gray-400 mb-4 leading-relaxed">
+                         開啟此功能後，只要有任何一位<span className="text-white">管理員的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
+                         <span className="text-yellow-400 text-xs">注意：背景檢查是用網頁上的記憶體計算，消耗 0 次讀取量。此設定為全域同步。</span>
+                       </p>
+                       <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-gray-800 p-4 rounded-lg border border-gray-700">
+                          <label className="flex items-center gap-2.5 cursor-pointer shrink-0">
+                            <input 
+                               type="checkbox" 
+                               checked={sysSettings.autoClearEnabled} 
+                               onChange={e => handleUpdateSysSettings({ autoClearEnabled: e.target.checked })} 
+                               className="w-5 h-5 accent-green-500 rounded border-gray-600 bg-gray-700 cursor-pointer" 
+                            />
+                            <span className="text-base text-gray-200 font-bold">啟用自動清除</span>
+                          </label>
+                          <div className="h-8 w-px bg-gray-600 hidden sm:block"></div>
+                          <div className="flex flex-wrap items-center gap-2">
+                             <span className="text-gray-400 text-sm">王確定重生</span>
+                             <select 
+                               value={sysSettings.autoClearHours || 4} 
+                               onChange={e => handleUpdateSysSettings({ autoClearHours: Number(e.target.value) })}
+                               disabled={!sysSettings.autoClearEnabled}
+                               className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-green-500 disabled:opacity-50"
+                             >
+                                <option value={1}>1 小時</option>
+                                <option value={2}>2 小時</option>
+                                <option value={3}>3 小時</option>
+                                <option value={4}>4 小時</option>
+                                <option value={8}>8 小時</option>
+                                <option value={12}>12 小時</option>
+                             </select>
+                             <span className="text-gray-400 text-sm">後自動刪除，</span>
+                             
+                             <span className="text-gray-400 text-sm">掃描頻率：每</span>
+                             <select 
+                               value={sysSettings.autoClearInterval || 1} 
+                               onChange={e => handleUpdateSysSettings({ autoClearInterval: Number(e.target.value) })}
+                               disabled={!sysSettings.autoClearEnabled}
+                               className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-green-500 disabled:opacity-50"
+                             >
+                                <option value={1}>1 分鐘</option>
+                                <option value={5}>5 分鐘</option>
+                                <option value={15}>15 分鐘</option>
+                                <option value={30}>30 分鐘</option>
+                                <option value={60}>60 分鐘</option>
+                             </select>
+                             <span className="text-gray-400 text-sm">檢查一次</span>
+                          </div>
+                       </div>
+                    </div>
+
                     <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
                       <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2"><Server className="w-5 h-5 text-red-400"/> 緊急維護與強制踢人</h3>
                       <p className="text-sm text-gray-400 mb-4 leading-relaxed">
