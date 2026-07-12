@@ -356,6 +356,7 @@
       const [newPwd, setNewPwd] = useState('');
       const [patrolModalData, setPatrolModalData] = useState(null); 
       const [expandedMemoId, setExpandedMemoId] = useState(null); 
+      const [isReportFormCollapsed, setIsReportFormCollapsed] = useState(false); // 吸頂表單摺疊狀態
       
       const [searchQuery, setSearchQuery] = useState('');
       const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -413,7 +414,7 @@
           clearTimeout(idleTimer);
           idleTimer = setTimeout(() => {
             setIsSleeping(true);
-          }, 30 * 60 * 1000); // 改為 30 分鐘無操作則進入休眠
+          }, 30 * 60 * 1000); // 30 分鐘無操作則進入休眠
         };
 
         resetIdleTimer();
@@ -791,6 +792,7 @@
           setChannelInput(''); 
           setMemoInput('');
           setKillTimeInput('');
+          setIsReportFormCollapsed(true); // 回報後自動收起表單
           showMessage(`已成功回報 ${template.name} (${channelInput.trim()}頻)`, "success");
         } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
       };
@@ -1281,10 +1283,12 @@
                                     </span>
                                     
                                     <div className="flex items-center gap-1">
-                                        {/* 個人巡邏 */}
-                                        <button onClick={(e) => { e.stopPropagation(); handleLocalPatrol(active.id); }} className={`w-6 h-6 sm:w-7 sm:h-7 rounded text-[10px] sm:text-xs transition-colors flex items-center justify-center shrink-0 border ${localPatrols[active.id] ? 'bg-cyan-600/20 text-cyan-400 border-cyan-500/30' : 'bg-gray-700/50 text-gray-400 border-gray-600/50 hover:bg-gray-600'}`} title={localPatrols[active.id] ? `您於 ${new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})} 標記檢查` : "標記個人巡邏 (無讀取消耗, 僅自己可見)"}>
-                                          ⌛
-                                        </button>
+                                        {/* 個人巡邏 (僅限可能重生區間 isFloating) */}
+                                        {isFloating && !isRekilled && (
+                                          <button onClick={(e) => { e.stopPropagation(); handleLocalPatrol(active.id); }} className={`w-6 h-6 sm:w-7 sm:h-7 rounded text-[10px] sm:text-xs transition-colors flex items-center justify-center shrink-0 border ${localPatrols[active.id] ? 'bg-cyan-600/20 text-cyan-400 border-cyan-500/30' : 'bg-gray-700/50 text-gray-400 border-gray-600/50 hover:bg-gray-600'}`} title={localPatrols[active.id] ? `您於 ${new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})} 標記檢查` : "標記個人巡邏 (無讀取消耗, 僅自己可見)"}>
+                                            ⌛
+                                          </button>
+                                        )}
 
                                         {showActionButtons && (
                                           <>
@@ -1602,69 +1606,79 @@
 
             {(!isAdmin || adminTab === 'home') && (
               <>
-                <section className="bg-gray-800 p-6 rounded-2xl shadow-lg border border-blue-500/30 relative z-10 animate-in fade-in duration-300">
-                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-blue-400">
-                    <Crosshair className="w-5 h-5" />
-                    回報擊殺紀錄
-                  </h2>
-                  {bossTemplates.length === 0 ? (
-                    <div className="text-center py-6 text-gray-400 bg-gray-900 rounded-lg border border-gray-700">
-                      系統目前尚未設定任何 BOSS 種類。
-                    </div>
-                  ) : (
-                    <form onSubmit={handleReportKill} className="flex flex-wrap gap-3 items-end">
-                      
-                      {/* 搜尋王 */}
-                      <div className="w-full sm:flex-1 min-w-[140px] max-w-full sm:max-w-[200px] shrink-0">
-                        <label className="block text-sm text-gray-400 mb-1">搜尋王</label>
-                        <div className="relative">
-                          <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                          <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="輸入關鍵字..." className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
+                <section className={`bg-gray-800/95 backdrop-blur-xl rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.6)] border border-blue-500/30 relative z-[40] sticky top-2 md:top-4 animate-in fade-in duration-300 transition-all ${isReportFormCollapsed ? 'p-4' : 'p-5 sm:p-6'}`}>
+                  <div className="flex justify-between items-center cursor-pointer select-none" onClick={() => setIsReportFormCollapsed(!isReportFormCollapsed)}>
+                    <h2 className="text-lg font-semibold flex items-center gap-2 text-blue-400">
+                      <Crosshair className="w-5 h-5" />
+                      回報擊殺紀錄
+                    </h2>
+                    <button type="button" className="text-blue-400 p-1.5 hover:bg-gray-700/50 rounded-lg transition-colors" title={isReportFormCollapsed ? "展開表單" : "收起表單"}>
+                      {isReportFormCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                    </button>
+                  </div>
+                  
+                  {!isReportFormCollapsed && (
+                    <div className="mt-4 pt-4 border-t border-gray-700/50 animate-in slide-in-from-top-2">
+                      {bossTemplates.length === 0 ? (
+                        <div className="text-center py-6 text-gray-400 bg-gray-900 rounded-lg border border-gray-700">
+                          系統目前尚未設定任何 BOSS 種類。
                         </div>
-                      </div>
-                      
-                      {/* 選擇 BOSS */}
-                      <div className="w-full sm:flex-[2] min-w-[200px] max-w-full shrink-0">
-                        <label className="block text-sm text-gray-400 mb-1">選擇 BOSS</label>
-                        <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" required>
-                          {filteredTemplates.length > 0 ? filteredTemplates.map(t => <option key={t.id} value={t.id}>{t.name} {t.level ? `Lv.${t.level}` : ''} (CD: {t.minCooldown || t.cooldownMinutes}{t.maxCooldown && t.maxCooldown !== (t.minCooldown || t.cooldownMinutes) ? `~${t.maxCooldown}` : ''}分)</option>) : <option value="">找不到符合的王</option>}
-                        </select>
-                      </div>
-                      
-                      {/* 分流 */}
-                      <div className="w-[80px] shrink-0">
-                        <label className="block text-sm text-gray-400 mb-1">分流</label>
-                        <input type="number" min="1" value={channelInput} onChange={(e) => setChannelInput(e.target.value)} placeholder="數字" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center" required />
-                      </div>
-                      
-                      {/* 備註 */}
-                      <div className="flex-1 min-w-[120px] max-w-full sm:max-w-[200px] shrink-0">
-                        <label className="block text-sm text-gray-400 mb-1">備註 (選填)</label>
-                        <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="掉落等..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
-                      </div>
-                      
-                      {/* 日期與擊殺時間 */}
-                      <div className="w-full sm:w-auto shrink-0 flex gap-1">
-                         <div className="w-[75px] shrink-0">
-                           <label className="block text-sm text-gray-400 mb-1">日期</label>
-                           <select value={killDateSelect} onChange={e=>setKillDateSelect(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-1 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center">
-                             <option value="today">今天</option>
-                             <option value="yesterday">昨天</option>
-                           </select>
-                         </div>
-                         <div className="flex-1 sm:w-[140px] shrink-0 relative">
-                           <label className="block text-sm text-gray-400 mb-1">擊殺時間 (選填)</label>
-                           <input type="time" step="1" value={killTimeInput} onChange={(e) => setKillTimeInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 sm:px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] [color-scheme:dark]" title="若空白則預設為現在" />
-                         </div>
-                      </div>
+                      ) : (
+                        <form onSubmit={handleReportKill} className="flex flex-wrap gap-3 items-end">
+                          
+                          {/* 搜尋王 */}
+                          <div className="w-full sm:flex-1 min-w-[140px] max-w-full sm:max-w-[200px] shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">搜尋王</label>
+                            <div className="relative">
+                              <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="輸入關鍵字..." className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
+                            </div>
+                          </div>
+                          
+                          {/* 選擇 BOSS */}
+                          <div className="w-full sm:flex-[2] min-w-[200px] max-w-full shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">選擇 BOSS</label>
+                            <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" required>
+                              {filteredTemplates.length > 0 ? filteredTemplates.map(t => <option key={t.id} value={t.id}>{t.name} {t.level ? `Lv.${t.level}` : ''} (CD: {t.minCooldown || t.cooldownMinutes}{t.maxCooldown && t.maxCooldown !== (t.minCooldown || t.cooldownMinutes) ? `~${t.maxCooldown}` : ''}分)</option>) : <option value="">找不到符合的王</option>}
+                            </select>
+                          </div>
+                          
+                          {/* 分流 */}
+                          <div className="w-[80px] shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">分流</label>
+                            <input type="number" min="1" value={channelInput} onChange={(e) => setChannelInput(e.target.value)} placeholder="數字" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center" required />
+                          </div>
+                          
+                          {/* 備註 */}
+                          <div className="flex-1 min-w-[120px] max-w-full sm:max-w-[200px] shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">備註 (選填)</label>
+                            <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="掉落等..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
+                          </div>
+                          
+                          {/* 日期與擊殺時間 */}
+                          <div className="w-full sm:w-auto shrink-0 flex gap-1">
+                             <div className="w-[75px] shrink-0">
+                               <label className="block text-sm text-gray-400 mb-1">日期</label>
+                               <select value={killDateSelect} onChange={e=>setKillDateSelect(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-1 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center">
+                                 <option value="today">今天</option>
+                                 <option value="yesterday">昨天</option>
+                               </select>
+                             </div>
+                             <div className="flex-1 sm:w-[140px] shrink-0 relative">
+                               <label className="block text-sm text-gray-400 mb-1">擊殺時間 (選填)</label>
+                               <input type="time" step="1" value={killTimeInput} onChange={(e) => setKillTimeInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 sm:px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] [color-scheme:dark]" title="若空白則預設為現在" />
+                             </div>
+                          </div>
 
-                      {/* 按鈕 */}
-                      <div className="w-full lg:w-auto shrink-0 mt-1 sm:mt-0">
-                        <button type="submit" disabled={isReporting || !selectedTemplateId} className="w-full lg:min-w-[120px] bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-3 h-[48px] sm:h-[52px] rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center shadow-lg shadow-blue-900/20 whitespace-nowrap">
-                          {isReporting ? '處理中' : '開始倒數'}
-                        </button>
-                      </div>
-                    </form>
+                          {/* 按鈕 */}
+                          <div className="w-full lg:w-auto shrink-0 mt-1 sm:mt-0">
+                            <button type="submit" disabled={isReporting || !selectedTemplateId} className="w-full lg:min-w-[120px] bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-3 h-[48px] sm:h-[52px] rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                              {isReporting ? '處理中' : '開始倒數'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
                   )}
                 </section>
 
