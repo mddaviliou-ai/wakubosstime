@@ -52,8 +52,16 @@
     import { createRoot } from 'react-dom/client';
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInAnonymously } from 'firebase/auth';
-    import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where } from 'firebase/firestore';
+    import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where, getDoc, limit } from 'firebase/firestore';
     import { Clock, History, Activity, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff, Power, Ban, Moon, Settings } from 'lucide-react';
+
+    // 解決 iframe 預覽環境下 localStorage 存取被封鎖的錯誤
+    let memoryStorage = {};
+    const safeStorage = {
+      getItem: (key) => { try { return localStorage.getItem(key); } catch(e) { return memoryStorage[key] || null; } },
+      setItem: (key, val) => { try { localStorage.setItem(key, String(val)); } catch(e) { memoryStorage[key] = String(val); } },
+      removeItem: (key) => { try { localStorage.removeItem(key); } catch(e) { delete memoryStorage[key]; } }
+    };
 
     const firebaseConfig = {
       apiKey: "AIzaSyD763KJlKWIEXHCjXcQD3WXxup7DPZbh7Y",
@@ -197,16 +205,6 @@
             const snap = await getDocs(q);
             
             if (snap.empty) {
-              if (trimmedUser === '茶米' && password === 'zaza') {
-                const docRef = await addDoc(collection(db, 'users'), {
-                  username: '茶米', password: 'zaza', role: 'admin', status: 'approved', createdAt: Date.now(), canClearStale: true
-                });
-                const adminUser = { id: docRef.id, username: '茶米', role: 'admin', status: 'approved', canClearStale: true };
-                localStorage.setItem('wakuboss_user_id', docRef.id);
-                setAppUser(adminUser);
-                showMessage('管理員帳號已自動建立並登入', 'success');
-                return;
-              }
               showMessage('找不到此帳號，請確認或前往註冊', 'error');
               setIsLoading(false);
               return;
@@ -216,7 +214,7 @@
             snap.forEach(d => { if (d.data().password === password) foundUser = { id: d.id, ...d.data() }; });
             
             if (foundUser) {
-              localStorage.setItem('wakuboss_user_id', foundUser.id);
+              safeStorage.setItem('wakuboss_user_id', foundUser.id);
               setAppUser(foundUser);
               showMessage(`歡迎回來，${foundUser.username}`, 'success');
             } else {
@@ -231,8 +229,13 @@
               return;
             }
 
+            // 安全的初始管理員機制：若資料庫中沒有任何管理員，則此新註冊帳號自動成為管理員
+            const adminQ = query(collection(db, 'users'), where('role', '==', 'admin'), limit(1));
+            const adminSnap = await getDocs(adminQ);
+            const noAdminExists = adminSnap.empty;
+
             const pass = password || '1234'; 
-            const isAdmin = trimmedUser === '茶米' && pass === 'zaza';
+            const isAdmin = noAdminExists;
             
             const newUser = {
               username: trimmedUser,
@@ -246,9 +249,9 @@
             };
 
             const docRef = await addDoc(collection(db, 'users'), newUser);
-            localStorage.setItem('wakuboss_user_id', docRef.id);
+            safeStorage.setItem('wakuboss_user_id', docRef.id);
             setAppUser({ id: docRef.id, ...newUser });
-            showMessage(isAdmin ? '管理員註冊成功' : '註冊成功，請等待管理員開通', 'success');
+            showMessage(isAdmin ? '目前無管理員，您已自動升級為系統管理員' : '註冊成功，請等待管理員開通', 'success');
           }
         } catch (error) {
           console.error(error);
@@ -328,14 +331,14 @@
       const [uiTick, setUiTick] = useState(0);
       const [sysSettings, setSysSettings] = useState({ autoClearEnabled: false, autoClearHours: 4, autoClearInterval: 1 });
 
-      const [activeModalBossId, setActiveModalBossId] = useState(() => localStorage.getItem('wakuboss_active_modal') || null); 
+      const [activeModalBossId, setActiveModalBossId] = useState(() => safeStorage.getItem('wakuboss_active_modal') || null); 
       const [modalPage, setModalPage] = useState(1); 
       const [adminTab, setAdminTab] = useState('home'); 
       const [showPwdModal, setShowPwdModal] = useState(false);
       const [newPwd, setNewPwd] = useState('');
       const [patrolModalData, setPatrolModalData] = useState(null); 
       const [expandedMemoId, setExpandedMemoId] = useState(null); 
-      const [isReportFormCollapsed, setIsReportFormCollapsed] = useState(() => localStorage.getItem('wakuboss_form_collapsed') === 'true');
+      const [isReportFormCollapsed, setIsReportFormCollapsed] = useState(() => safeStorage.getItem('wakuboss_form_collapsed') === 'true');
       
       const [searchQuery, setSearchQuery] = useState('');
       const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -350,16 +353,16 @@
       const [modalKillDateSelect, setModalKillDateSelect] = useState('today');
 
       const [pinnedBosses, setPinnedBosses] = useState(() => {
-        const saved = localStorage.getItem(`wakuboss_pinned_${appUser.id}`);
+        const saved = safeStorage.getItem(`wakuboss_pinned_${appUser.id}`);
         return saved ? JSON.parse(saved) : [];
       });
       
       const [localPatrols, setLocalPatrols] = useState(() => {
-        const saved = localStorage.getItem(`wakuboss_local_patrols_${appUser.id}`);
+        const saved = safeStorage.getItem(`wakuboss_local_patrols_${appUser.id}`);
         return saved ? JSON.parse(saved) : {};
       });
 
-      const [bossSort, setBossSort] = useState(() => localStorage.getItem('wakuboss_sort') || 'levelAsc'); 
+      const [bossSort, setBossSort] = useState(() => safeStorage.getItem('wakuboss_sort') || 'levelAsc'); 
       const [adminSortOrder, setAdminSortOrder] = useState('levelDesc'); 
       const [newTemplateName, setNewTemplateName] = useState('');
       const [newTemplateLevel, setNewTemplateLevel] = useState('');
@@ -379,16 +382,16 @@
 
       // 手機背景保護與狀態儲存
       useEffect(() => {
-        if (activeModalBossId) localStorage.setItem('wakuboss_active_modal', activeModalBossId);
-        else localStorage.removeItem('wakuboss_active_modal');
+        if (activeModalBossId) safeStorage.setItem('wakuboss_active_modal', activeModalBossId);
+        else safeStorage.removeItem('wakuboss_active_modal');
       }, [activeModalBossId]);
 
       useEffect(() => {
-        localStorage.setItem('wakuboss_sort', bossSort);
+        safeStorage.setItem('wakuboss_sort', bossSort);
       }, [bossSort]);
 
       useEffect(() => {
-        localStorage.setItem('wakuboss_form_collapsed', isReportFormCollapsed);
+        safeStorage.setItem('wakuboss_form_collapsed', isReportFormCollapsed);
       }, [isReportFormCollapsed]);
 
       useEffect(() => {
@@ -434,7 +437,7 @@
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
 
       useEffect(() => {
-        if (!isAdmin || !sysSettings.autoClearEnabled || isSleeping) return;
+        if (!sysSettings.autoClearEnabled || isSleeping) return;
         
         const checkIntervalMs = (sysSettings.autoClearInterval || 1) * 60 * 1000;
         
@@ -470,7 +473,7 @@
       };
 
       useEffect(() => {
-        localStorage.setItem(`wakuboss_pinned_${appUser.id}`, JSON.stringify(pinnedBosses));
+        safeStorage.setItem(`wakuboss_pinned_${appUser.id}`, JSON.stringify(pinnedBosses));
       }, [pinnedBosses, appUser.id]);
 
       const togglePin = (e, bossId) => {
@@ -484,7 +487,7 @@
       const handleLocalPatrol = (activeId) => {
         setLocalPatrols(prev => {
           const next = { ...prev, [activeId]: Date.now() };
-          localStorage.setItem(`wakuboss_local_patrols_${appUser.id}`, JSON.stringify(next));
+          safeStorage.setItem(`wakuboss_local_patrols_${appUser.id}`, JSON.stringify(next));
           return next;
         });
         showMessage('已記錄個人巡邏 (不消耗讀取量)', 'success');
@@ -1511,8 +1514,8 @@
                     <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
                        <h3 className="text-lg font-bold text-green-400 mb-2 flex items-center gap-2"><Trash2 className="w-5 h-5"/> 自動清除過期紀錄</h3>
                        <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                         開啟此功能後，只要有任何一位<span className="text-white">管理員的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
-                         <span className="text-yellow-400 text-xs">注意：背景檢查是用網頁上的記憶體計算，消耗 0 次讀取量。此設定為全域同步。</span>
+                         開啟此功能後，只要有任何一位<span className="text-white">會員的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
+                         <span className="text-yellow-400 text-xs">注意：背景檢查是用網頁上的記憶體計算，消耗 0 次讀取量。此設定為全域同步。若完全無人在線上，則會在下一位會員開啟網頁時立即自動執行清理。</span>
                        </p>
                        <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-gray-800 p-4 rounded-lg border border-gray-700">
                           <label className="flex items-center gap-2.5 cursor-pointer shrink-0">
@@ -1748,59 +1751,70 @@
     function App() {
       const [appUser, setAppUser] = useState(null);
       const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-      const [alertMsg, setAlertMsg] = useState(null); 
+      const [alertMsg, setAlertMsg] = useState(null);
 
-      const showMessage = (text, type = 'error') => {
+      const showMessage = (text, type = 'info') => {
         setAlertMsg({ text, type });
-        setTimeout(() => setAlertMsg(null), 5000);
+        setTimeout(() => setAlertMsg(null), 3000);
+      };
+
+      const handleLogout = () => {
+        safeStorage.removeItem('wakuboss_user_id');
+        setAppUser(null);
       };
 
       useEffect(() => {
-        const storedUserId = localStorage.getItem('wakuboss_user_id');
-        if (!storedUserId) {
-          setIsCheckingAuth(false);
-          return;
-        }
-        
-        const unsub = onSnapshot(doc(db, 'users', storedUserId), (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            
-            if (data.forceRefresh) {
-               updateDoc(doc(db, 'users', storedUserId), { forceRefresh: false })
-                 .then(() => window.location.reload())
-                 .catch(() => window.location.reload());
-            } 
-            else if (data.forceKicked) {
-               localStorage.removeItem('wakuboss_user_id');
-               setAppUser(null);
-               updateDoc(doc(db, 'users', storedUserId), { forceKicked: false }).catch(()=>{});
-               showMessage('管理員已強制將您登出 / 系統維護中', 'error');
-            } else {
-               setAppUser({ id: docSnap.id, ...data });
+        const checkAuth = async () => {
+          const savedId = safeStorage.getItem('wakuboss_user_id');
+          if (savedId) {
+            try {
+              const docRef = doc(db, 'users', savedId);
+              const docSnap = await getDoc(docRef);
+              if (docSnap.exists()) {
+                setAppUser({ id: docSnap.id, ...docSnap.data() });
+              } else {
+                safeStorage.removeItem('wakuboss_user_id');
+              }
+            } catch (error) {
+              console.error("Auth check failed:", error);
             }
-          } else {
-            setAppUser(null);
-            localStorage.removeItem('wakuboss_user_id');
           }
           setIsCheckingAuth(false);
-        }, (error) => {
-          console.warn("Auth 監聽暫時中斷或網路異常:", error);
-        });
-
-        return () => unsub();
+        };
+        checkAuth();
       }, []);
 
-      const handleLogout = () => {
-        localStorage.removeItem('wakuboss_user_id');
-        setAppUser(null);
-        showMessage('已成功登出', 'success');
-      };
+      useEffect(() => {
+        if (!appUser) return;
+        const unsub = onSnapshot(doc(db, 'users', appUser.id), (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.forceKicked) {
+              handleLogout();
+              updateDoc(doc(db, 'users', appUser.id), { forceKicked: false }).catch(()=>{});
+              alert("您已被管理員強制登出。");
+            } else if (data.forceRefresh) {
+              updateDoc(doc(db, 'users', appUser.id), { forceRefresh: false }).catch(()=>{});
+              window.location.reload();
+            } else if (
+              data.status !== appUser.status || 
+              data.role !== appUser.role || 
+              data.canClearStale !== appUser.canClearStale || 
+              data.password !== appUser.password
+            ) {
+              setAppUser(prev => ({ ...prev, ...data }));
+            }
+          } else {
+             handleLogout();
+          }
+        });
+        return () => unsub();
+      }, [appUser?.id]);
 
       return (
         <>
           {alertMsg && (
-            <div className={`fixed top-4 right-4 z-[99] px-5 py-4 rounded-xl flex items-center gap-4 shadow-2xl animate-in slide-in-from-top-4 border ${
+            <div className={`fixed top-4 right-4 z-[9999] px-5 py-4 rounded-xl flex items-center gap-4 shadow-2xl animate-in slide-in-from-top-4 border ${
               alertMsg.type === 'success' ? 'bg-green-900/90 border-green-500 text-green-100' : 'bg-red-900/90 border-red-500 text-red-100'
             } bg-gray-900/95`}>
               <span className="flex items-center gap-2 font-medium">
