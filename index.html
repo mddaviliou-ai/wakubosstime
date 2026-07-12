@@ -84,7 +84,8 @@
         return () => clearInterval(timer);
       }, []);
 
-      if (!nextSpawnTime) return <span className="text-gray-400">未知</span>;
+      // 修正 Bug：嚴格檢查 null 或 undefined，因為全域重生時 nextSpawnTime 會是 0
+      if (nextSpawnTime === null || nextSpawnTime === undefined) return <span className="text-gray-400">未知</span>;
       
       const diffMin = nextSpawnTime - now;
       const diffMax = (maxSpawnTime || nextSpawnTime) - now;
@@ -424,12 +425,13 @@
         };
       }, [isSleeping]);
 
-      // --- 自動清除過期紀錄引擎 (僅管理員背景執行) ---
+      // --- 自動清除過期紀錄引擎 (修改為全體用戶共同執行) ---
       const activeBossesRef = useRef(activeBosses);
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
 
       useEffect(() => {
-        if (!isAdmin || !sysSettings.autoClearEnabled || isSleeping) return;
+        // 移除 isAdmin 限制，讓所有在線玩家都能幫忙清理
+        if (!sysSettings.autoClearEnabled || isSleeping) return;
         
         // 取得自訂的掃描頻率 (預設為 1 分鐘)，轉換為毫秒
         const checkIntervalMs = (sysSettings.autoClearInterval || 1) * 60 * 1000;
@@ -440,13 +442,16 @@
           activeBossesRef.current.forEach(active => {
             const spawnTime = active.maxSpawn || active.nextSpawn;
             if (now - spawnTime >= limitMs) {
-              deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
+              // 加入 0~5 秒的隨機延遲，防止多名玩家在同一毫秒送出大量重複的刪除請求
+              setTimeout(() => {
+                deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
+              }, Math.random() * 5000);
             }
           });
         }, checkIntervalMs); 
         
         return () => clearInterval(interval);
-      }, [isAdmin, sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
+      }, [sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
 
 
       // 解析使用者輸入的時間字串成時間戳記
@@ -1459,7 +1464,7 @@
                     <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
                        <h3 className="text-lg font-bold text-green-400 mb-2 flex items-center gap-2"><Trash2 className="w-5 h-5"/> 自動清除過期紀錄</h3>
                        <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                         開啟此功能後，只要有任何一位<span className="text-white">管理員的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
+                         開啟此功能後，只要有任何一位<span className="text-white">用戶的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景協同檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
                          <span className="text-yellow-400 text-xs">注意：背景檢查是用網頁上的記憶體計算，消耗 0 次讀取量。此設定為全域同步。</span>
                        </p>
                        <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-gray-800 p-4 rounded-lg border border-gray-700">
