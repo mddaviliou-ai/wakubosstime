@@ -590,8 +590,8 @@
             }
           });
 
-          const isGlobalActive = template.globalIsAlive || (effectiveGlobalMaxSpawn !== null && effectiveGlobalMaxSpawn > Date.now());
-          const hasRecord = channels.length > 0 || isGlobalActive;
+          // 修正：將全域狀態(維修/標記重生)從 hasRecord 中移除，僅計算「是否有分流紀錄」
+          const hasRecord = channels.length > 0;
 
           return { ...template, channels, effectiveGlobalSpawn, effectiveGlobalMaxSpawn, earliestSpawn: earliest, earliestMaxSpawn: earliestMax, hasRecord };
         });
