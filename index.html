@@ -343,6 +343,8 @@
       
       // 網頁休眠狀態
       const [isSleeping, setIsSleeping] = useState(false);
+      // UI 定期更新 (用於自動變更顏色狀態，不影響 Firebase)
+      const [uiTick, setUiTick] = useState(0);
 
       // 系統全域設定 (自動清除等)
       const [sysSettings, setSysSettings] = useState({ autoClearEnabled: false, autoClearHours: 4, autoClearInterval: 1 });
@@ -387,6 +389,13 @@
       const [isResettingGlobal, setIsResettingGlobal] = useState(false);
       const [globalBaseTime, setGlobalBaseTime] = useState(''); 
       const [staleClearHours, setStaleClearHours] = useState(4);
+
+      // --- UI 重繪計時器 (自動判定紅/黃/綠邊框) ---
+      useEffect(() => {
+        // 每 1 秒觸發一次畫面重繪，讓顏色可以秒數級精準切換，0 讀取消耗
+        const timer = setInterval(() => setUiTick(t => t + 1), 1000);
+        return () => clearInterval(timer);
+      }, []);
 
       // --- 休眠偵測計時器 ---
       useEffect(() => {
@@ -551,6 +560,8 @@
         }
       }, [filteredTemplates, selectedTemplateId]);
 
+      // 注意：這裡依賴了 uiTick，每 1 秒會觸發 displayBosses 重新計算，
+      // 這會讓 isWarning / isFloating 等 UI 狀態即時自動更新，秒數級精準！
       const displayBosses = useMemo(() => {
         let processed = bossTemplates.map(template => {
           const channels = activeBosses.filter(b => b.templateId === template.id);
@@ -601,7 +612,7 @@
            
            return aCD - bCD;
         });
-      }, [bossTemplates, activeBosses, bossSort, pinnedBosses]); 
+      }, [bossTemplates, activeBosses, bossSort, pinnedBosses, uiTick]); 
 
       const handleChangePassword = async (e) => {
         e.preventDefault();
@@ -694,7 +705,7 @@
       };
 
       const handleDeleteActiveBoss = async (activeId) => {
-        requestConfirm("確定要手動刪除這筆分流計時紀錄嗎？", async () => {
+        requestConfirm("確定要手裁除這筆分流計時紀錄嗎？", async () => {
           try { await deleteDoc(doc(db, 'activeBosses', activeId)); showMessage("已刪除分流紀錄", "success"); } catch(e) { showMessage("刪除失敗", "error"); }
         });
       };
@@ -1031,7 +1042,7 @@
               return null;
             }
             
-            // 粗略計算警告數量供上方狀態使用 (這裡的 Date.now() 不會頻繁觸發 Firebase 讀取)
+            // 每次 UI Tick 都會讓這裡重新拿最新的 Date.now()，因此顏色判定會即時更新！
             const currentNow = Date.now();
             const warningCount = group.channels.filter(ch => {
               const diff = ch.nextSpawn - currentNow;
@@ -1168,7 +1179,7 @@
                     {group.channels.length === 0 && group.effectiveGlobalSpawn === null && (
                       <p className="text-gray-500 text-center py-4 text-sm">目前沒有任何分流紀錄</p>
                     )}
-                     {group.channels.length > 0 && (() => {
+                    {group.channels.length > 0 && (() => {
                       const sortedChannels = [...group.channels].sort((a, b) => a.nextSpawn - b.nextSpawn);
                       const itemsPerPage = 10;
                       const totalPages = Math.max(1, Math.ceil(sortedChannels.length / itemsPerPage));
@@ -1178,7 +1189,7 @@
                       return (
                         <div className="flex flex-col gap-1">
                           {paginatedChannels.map(active => {
-                            // 使用粗略的時間來判定外部框線顏色 (這只是 UI 顏色，不會觸發 DB 讀取)
+                            // 使用由 UI Tick 更新的時間來判定外部框線顏色 (純 UI 切換，不觸發 DB 讀取)
                             const diffToNext = active.nextSpawn - currentNow;
                             const diffToMax = (active.maxSpawn || active.nextSpawn) - currentNow;
                             const isWarning = diffToNext <= 10 * 60 * 1000 && diffToNext > 0;
@@ -1631,7 +1642,7 @@
                       {displayBosses.map(group => {
                         const isPinned = pinnedBosses.includes(group.id);
                         
-                        // 這裡使用 Date.now() 只做純前端的 UI 計算，不影響 Firebase
+                        // 這裡受到 uiTick 的影響，每 1 秒會重算 currentNow
                         const currentNow = Date.now();
                         const warningCount = group.channels.filter(ch => {
                           const diff = ch.nextSpawn - currentNow;
