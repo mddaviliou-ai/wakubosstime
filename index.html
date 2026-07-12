@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>Waku野王重生計時</title>
+  <title>Waku野王重生計時器</title>
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://wakubosstime.vercel.app/">
-  <meta property="og:title" content="Waku野王重生計時">
+  <meta property="og:title" content="Waku野王重生計時器">
   <meta property="og:description" content="Waku即時的野王重生倒數追蹤工具。">
   <meta property="og:image" content="https://wakubosstime.vercel.app/logo2.png">
   <link rel="icon" href="./logo2.png" type="image/png">
@@ -265,7 +265,7 @@
               <div className="w-20 h-20 mb-4 bg-gray-900 rounded-2xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg">
                 <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
               </div>
-              <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時</h1>
+              <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時器</h1>
               <p className="text-gray-400 mt-2">{isLogin ? '登入以繼續使用' : '註冊新帳號'}</p>
             </div>
 
@@ -313,6 +313,7 @@
 
     function MainApp({ appUser, onLogout, showMessage }) {
       const isAdmin = appUser.role === 'admin';
+      const canDeleteStale = isAdmin || appUser.canClearStale;
       
       const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
       const requestConfirm = (message, onConfirm) => {
@@ -376,6 +377,7 @@
       const [globalBaseTime, setGlobalBaseTime] = useState(''); 
       const [staleClearHours, setStaleClearHours] = useState(4);
 
+      // 手機背景保護與狀態儲存
       useEffect(() => {
         if (activeModalBossId) localStorage.setItem('wakuboss_active_modal', activeModalBossId);
         else localStorage.removeItem('wakuboss_active_modal');
@@ -428,29 +430,27 @@
         };
       }, [isSleeping]);
 
-      // 自動清潔邏輯 (已開放給所有在線用戶，不再限定 Admin)
+      const activeBossesRef = useRef(activeBosses);
+      useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
+
       useEffect(() => {
-        if (!sysSettings.autoClearEnabled || isSleeping) return;
+        if (!isAdmin || !sysSettings.autoClearEnabled || isSleeping) return;
         
         const checkIntervalMs = (sysSettings.autoClearInterval || 1) * 60 * 1000;
         
-        const interval = setInterval(async () => {
+        const interval = setInterval(() => {
           const now = Date.now();
           const limitMs = (sysSettings.autoClearHours || 4) * 60 * 60 * 1000;
-          try {
-             const snap = await getDocs(collection(db, 'activeBosses'));
-             snap.forEach(docSnap => {
-               const data = docSnap.data();
-               const spawnTime = data.maxSpawn || data.nextSpawn;
-               if (now - spawnTime >= limitMs) {
-                 deleteDoc(docSnap.ref).catch(() => {});
-               }
-             });
-          } catch(e) {}
+          activeBossesRef.current.forEach(active => {
+            const spawnTime = active.maxSpawn || active.nextSpawn;
+            if (now - spawnTime >= limitMs) {
+              deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
+            }
+          });
         }, checkIntervalMs); 
         
         return () => clearInterval(interval);
-      }, [sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
+      }, [isAdmin, sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
 
 
       const parseKillTime = (timeStr, dateOption) => {
@@ -590,7 +590,7 @@
             }
           });
 
-          // 核心修復：hasRecord 僅依賴分流紀錄，與全域標記重生無關
+          // 修正：將全域狀態(維修/標記重生)從 hasRecord 中移除，僅計算「是否有分流紀錄」
           const hasRecord = channels.length > 0;
 
           return { ...template, channels, effectiveGlobalSpawn, effectiveGlobalMaxSpawn, earliestSpawn: earliest, earliestMaxSpawn: earliestMax, hasRecord };
@@ -967,7 +967,7 @@
 
       return (
         <div className="p-4 md:p-8 font-sans">
-          {/* 休眠與彈窗邏輯 */}
+          
           {isSleeping && (
             <div className="fixed inset-0 z-[999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-500">
               <div className="bg-gray-800 p-8 rounded-3xl border border-gray-700 shadow-2xl flex flex-col items-center max-w-sm text-center animate-in zoom-in-95">
@@ -975,7 +975,16 @@
                    <Moon className="w-10 h-10 text-blue-400 animate-pulse" />
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-3 tracking-wide">系統已休眠</h2>
-                <button onClick={() => setIsSleeping(false)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-3.5 rounded-xl transition-all shadow-lg shadow-blue-900/50 hover:scale-105 active:scale-95">喚醒系統</button>
+                <p className="text-gray-400 mb-8 leading-relaxed text-sm">
+                  超過 30 分鐘無操作。<br/>
+                  為避免佔用您的電腦效能與系統資源，網頁已自動暫停同步。
+                </p>
+                <button 
+                  onClick={() => setIsSleeping(false)} 
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-3.5 rounded-xl transition-all shadow-lg shadow-blue-900/50 flex items-center gap-2 hover:scale-105 active:scale-95"
+                >
+                  <Power className="w-5 h-5" /> 喚醒系統
+                </button>
               </div>
             </div>
           )}
@@ -990,7 +999,12 @@
                        <button 
                          onClick={async () => {
                            setIsReporting(true);
-                           try { await confirmDialog.onConfirm(); } finally { setIsReporting(false); setConfirmDialog({isOpen: false, message: '', onConfirm: null}); }
+                           try {
+                             await confirmDialog.onConfirm();
+                           } finally {
+                             setIsReporting(false);
+                             setConfirmDialog({isOpen: false, message: '', onConfirm: null});
+                           }
                          }} 
                          disabled={isReporting}
                          className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-medium flex-1 transition-colors disabled:opacity-50 flex justify-center items-center gap-2"
@@ -1025,17 +1039,38 @@
             return (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 animate-in fade-in" onClick={() => setPatrolModalData(null)}>
                 <div className="bg-gray-800 p-6 rounded-2xl border border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.15)] flex flex-col items-center gap-4 w-full max-w-[280px] animate-in zoom-in-95 duration-200" onClick={e=>e.stopPropagation()}>
-                   <div className="w-14 h-14 bg-purple-900/40 rounded-full flex items-center justify-center mb-1"><Search className="w-7 h-7 text-purple-400" /></div>
-                   <h4 className="font-bold text-white text-xl tracking-wide">{active.channel}頻 巡邏狀態</h4>
-                   <div className="w-full bg-gray-900 rounded-xl p-4 text-sm text-gray-300 space-y-2 border border-gray-700">
-                      {history.length === 0 ? <div className="text-center py-3 text-gray-500 text-xs">尚未有巡邏紀錄</div> : history.map((record, idx) => (
-                        <div key={idx} className="flex justify-between items-center py-1">
-                          <span className="font-medium text-gray-300 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />{new Date(record.time).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})}</span>
-                          <span className="font-medium text-purple-300 truncate">{record.userName}</span>
-                        </div>
-                      ))}
+                   <div className="w-14 h-14 bg-purple-900/40 rounded-full flex items-center justify-center mb-1">
+                     <Search className="w-7 h-7 text-purple-400" />
                    </div>
-                   <button onClick={() => handleCheckChannel(active)} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl transition-colors font-bold">在此分流簽到</button>
+                   <h4 className="font-bold text-white text-xl tracking-wide">{active.channel}頻 巡邏狀態</h4>
+                   
+                   <div className="w-full bg-gray-900 rounded-xl p-4 text-sm text-gray-300 space-y-2 border border-gray-700">
+                      <div className="text-xs text-gray-500 mb-2 border-b border-gray-800 pb-1">最近 3 筆巡邏紀錄</div>
+                      {history.length === 0 ? (
+                         <div className="text-center py-3 text-gray-500 text-xs">尚未有巡邏紀錄</div>
+                      ) : (
+                         history.map((record, idx) => (
+                           <div key={idx} className="flex justify-between items-center py-1">
+                              <span className="font-medium text-gray-300 flex items-center gap-1.5">
+                                 <Clock className="w-3.5 h-3.5 text-purple-500/70" />
+                                 {new Date(record.time).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})}
+                              </span>
+                              <span className="font-medium text-purple-300 max-w-[110px] truncate" title={record.userName}>
+                                 {record.userName}
+                              </span>
+                           </div>
+                         ))
+                      )}
+                   </div>
+
+                   <div className="w-full flex flex-col gap-2 mt-2">
+                     <button onClick={() => handleCheckChannel(active)} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl transition-colors font-bold shadow-lg shadow-purple-900/20">
+                        在此分流簽到
+                     </button>
+                     <button onClick={() => setPatrolModalData(null)} className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-xl transition-colors font-medium">
+                        關閉視窗
+                     </button>
+                   </div>
                 </div>
               </div>
             );
@@ -1043,42 +1078,269 @@
 
           {activeModalBossId && (() => {
             const group = displayBosses.find(g => g.id === activeModalBossId);
-            if (!group) { setActiveModalBossId(null); return null; }
+            if (!group) {
+              setActiveModalBossId(null);
+              return null;
+            }
+            
             const currentNow = Date.now();
-            const warningCount = group.channels.filter(ch => { const diff = ch.nextSpawn - currentNow; return diff > 0 && diff <= 10 * 60 * 1000; }).length;
+            const warningCount = group.channels.filter(ch => {
+              const diff = ch.nextSpawn - currentNow;
+              return diff > 0 && diff <= 10 * 60 * 1000;
+            }).length;
+
             return (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-in fade-in">
                 <div className="bg-gray-800 rounded-2xl border border-gray-700 w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+                  
                   <div className="p-4 sm:p-5 border-b border-gray-700 flex items-center justify-between bg-gray-800/80 rounded-t-2xl shrink-0">
                     <div className="flex items-center gap-4">
-                      <div className="flex shrink-0 w-12 h-12 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden border-gray-700">
-                        {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className="text-gray-500" />}
+                      <div className={`flex shrink-0 w-12 h-12 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${warningCount > 0 ? 'border-red-500/40' : 'border-gray-700'}`}>
+                        {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${warningCount > 0 ? 'text-red-400' : 'text-gray-500'}`} />}
                       </div>
                       <div className="flex flex-col">
-                        <h3 className="text-lg font-bold text-white">{group.name}</h3>
-                        <div className="text-sm mt-1 flex items-center gap-2"><span className="text-gray-400">最快重生:</span><CountdownTimer nextSpawnTime={group.earliestSpawn} maxSpawnTime={group.earliestMaxSpawn} /></div>
-                      </div>
-                    </div>
-                    <button onClick={() => setActiveModalBossId(null)} className="p-2 bg-gray-900 hover:bg-gray-700 rounded-full"><X className="w-5 h-5" /></button>
-                  </div>
-                  <div className="p-4 sm:p-5 overflow-y-auto flex flex-col gap-3">
-                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className="flex flex-col gap-2 bg-gray-900/60 p-3 rounded-xl border border-gray-700">
-                      <div className="flex gap-2">
-                        <input type="number" min="1" value={modalChannelInput} onChange={e => setModalChannelInput(e.target.value)} placeholder="分流" className="w-20 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white" required />
-                        <input type="text" value={modalMemoInput} onChange={e => setModalMemoInput(e.target.value)} placeholder="備註" className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white" />
-                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold">登記</button>
-                      </div>
-                    </form>
-                    {group.channels.length > 0 ? group.channels.sort((a,b)=>a.nextSpawn-b.nextSpawn).map(active => (
-                      <div key={active.id} className="flex items-center justify-between p-3 bg-gray-800 border border-gray-700 rounded-lg">
-                        <span className="font-bold text-blue-400">{active.channel}頻</span>
-                        <CountdownTimer nextSpawnTime={active.nextSpawn} maxSpawnTime={active.maxSpawn} />
-                        <div className="flex gap-2">
-                           <button onClick={() => handleQuickReportKill(active)} className="text-xs bg-blue-600 px-2 py-1 rounded">⚔️擊殺</button>
-                           <button onClick={() => handleDeleteActiveBoss(active.id)} className="text-xs bg-red-600 px-2 py-1 rounded">刪除</button>
+                        <div className="flex items-center flex-wrap gap-2">
+                          <h3 className="text-lg sm:text-xl font-bold text-white">{group.name}</h3>
+                          {group.level && <span className="text-yellow-400 text-sm sm:text-base font-bold">Lv.{group.level}</span>}
+                          <span className="text-[11px] sm:text-xs text-gray-400 bg-gray-900 px-2 py-0.5 rounded border border-gray-700 font-medium whitespace-nowrap ml-0.5">
+                            CD: {group.minCooldown || group.cooldownMinutes}{group.maxCooldown && group.maxCooldown !== (group.minCooldown || group.cooldownMinutes) ? `~${group.maxCooldown}` : ''}分
+                          </span>
+                        </div>
+                        <div className="text-sm mt-1 flex items-center gap-1.5 sm:gap-2">
+                          <span className="text-gray-400">最快重生:</span>
+                          <CountdownTimer nextSpawnTime={group.earliestSpawn} maxSpawnTime={group.earliestMaxSpawn} />
                         </div>
                       </div>
-                    )) : <p className="text-gray-500 text-center py-4">目前沒有分流紀錄</p>}
+                    </div>
+                    <button onClick={() => setActiveModalBossId(null)} className="p-2 bg-gray-900 hover:bg-gray-700 rounded-full transition-colors shrink-0">
+                      <X className="w-5 h-5 text-gray-400" />
+                    </button>
+                  </div>
+
+                  <div className="p-4 sm:p-5 overflow-y-auto flex flex-col gap-3">
+                    
+                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className="flex flex-col gap-2 bg-gray-900/60 p-2 sm:p-3 rounded-xl border border-gray-700/80 shrink-0">
+                      <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-1 gap-2 min-w-[200px]">
+                          <div className="w-[110px] sm:w-[130px] shrink-0 relative">
+                            <MapPin className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            <input type="number" min="1" value={modalChannelInput} onChange={e => setModalChannelInput(e.target.value)} placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-8 pr-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center" required />
+                          </div>
+                          <div className="flex-1">
+                            <input type="text" value={modalMemoInput} onChange={e => setModalMemoInput(e.target.value)} placeholder="備註 (選填, 例: 掉寶)" className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+                          </div>
+                        </div>
+
+                        <div className="flex w-full sm:w-auto items-center gap-1.5 shrink-0 justify-end">
+                          <select value={modalKillDateSelect} onChange={e=>setModalKillDateSelect(e.target.value)} className="w-[65px] bg-gray-800 border border-gray-600 rounded-lg px-1 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center">
+                            <option value="today">今天</option>
+                            <option value="yesterday">昨天</option>
+                          </select>
+                          <input type="time" step="1" value={modalKillTimeInput} onChange={e => setModalKillTimeInput(e.target.value)} className="w-[105px] bg-gray-800 border border-gray-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]" title="擊殺時間 (空白為現在)" />
+                          <button type="submit" disabled={isReporting || !modalChannelInput.trim()} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 h-[38px] min-w-[70px]">
+                            登記
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 shrink-0 mb-1">
+                      <div className="flex flex-wrap items-center gap-4 bg-gray-900/40 p-2.5 rounded-xl border border-gray-700/50">
+                        <div className="flex items-center gap-2 text-xs text-red-400 font-medium">
+                          <div className="w-2.5 h-2.5 rounded-[3px] bg-red-900/80 border border-red-500/50"></div>
+                          準備重生了
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-yellow-400 font-medium">
+                          <div className="w-2.5 h-2.5 rounded-[3px] bg-yellow-900/80 border border-yellow-500/50"></div>
+                          可能重生頻道
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-purple-400 font-medium">
+                          <div className="w-2.5 h-2.5 rounded-[3px] bg-purple-900/80 border border-purple-500/50"></div>
+                          再次擊殺頻道
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-cyan-400 font-medium ml-1">
+                          ⌛ 個人巡邏 (不耗讀取)
+                        </div>
+                      </div>
+                      
+                      {canDeleteStale && group.channels.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          {isAdmin ? (
+                            <>
+                              <select 
+                                 value={staleClearHours} 
+                                 onChange={(e)=>setStaleClearHours(Number(e.target.value))}
+                                 className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-2 outline-none focus:border-red-500/50"
+                              >
+                                 <option value={1}>1小時+</option>
+                                 <option value={2}>2小時+</option>
+                                 <option value={3}>3小時+</option>
+                                 <option value={4}>4小時+</option>
+                                 <option value={8}>8小時+</option>
+                                 <option value={12}>12小時+</option>
+                              </select>
+                              <button onClick={() => handleClearStaleRecords(group, staleClearHours)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
+                                <Trash2 className="w-3.5 h-3.5" /> 清除過期
+                              </button>
+                            </>
+                          ) : (
+                            <button onClick={() => handleClearStaleRecords(group, 4)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
+                              <Trash2 className="w-3.5 h-3.5" /> 清除過期 (4hr+)
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {group.effectiveGlobalSpawn !== null && (
+                      <div className={`flex items-center justify-between p-2 sm:p-2.5 rounded-lg border relative overflow-hidden shrink-0 bg-purple-900/20 border-purple-500/40`}>
+                        <div className="flex items-center gap-2.5 relative z-10">
+                          <div className={`flex flex-col items-center justify-center border rounded px-2 py-1 min-w-[3.5rem] bg-purple-900/50 border-purple-500/50`}>
+                            <Server className={`w-3.5 h-3.5 mb-0.5 text-purple-400`} />
+                            <span className={`font-bold text-[10px] sm:text-[11px] leading-tight text-purple-300`}>全伺服器</span>
+                          </div>
+                          <div className="text-[11px] sm:text-xs text-gray-400 flex flex-col">
+                            <span className="text-gray-300 tracking-wide">系統維修 / 全域計時</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 relative z-10 mr-1">
+                          <span className="text-[11px] sm:text-sm">
+                             <CountdownTimer nextSpawnTime={group.effectiveGlobalSpawn} maxSpawnTime={group.effectiveGlobalMaxSpawn} />
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {group.channels.length === 0 && group.effectiveGlobalSpawn === null && (
+                      <p className="text-gray-500 text-center py-4 text-sm">目前沒有任何分流紀錄</p>
+                    )}
+                    {group.channels.length > 0 && (() => {
+                      const sortedChannels = [...group.channels].sort((a, b) => a.nextSpawn - b.nextSpawn);
+                      const itemsPerPage = 10;
+                      const totalPages = Math.max(1, Math.ceil(sortedChannels.length / itemsPerPage));
+                      const safePage = Math.min(modalPage, totalPages);
+                      const paginatedChannels = sortedChannels.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
+                      return (
+                        <div className="flex flex-col gap-1">
+                          {paginatedChannels.map(active => {
+                            const diffToNext = active.nextSpawn - currentNow;
+                            const diffToMax = (active.maxSpawn || active.nextSpawn) - currentNow;
+                            const isWarning = diffToNext <= 10 * 60 * 1000 && diffToNext > 0;
+                            const isFloating = diffToNext <= 0 && diffToMax > 0; 
+                            const isSpawned = diffToMax <= 0; 
+                            
+                            const isRekilled = active.isRekilled === true; 
+                            const canDelete = isAdmin || active.reportedBy === appUser.id;
+                            const isExpanded = expandedMemoId === active.id;
+                            
+                            const showActionButtons = (isFloating || isSpawned);
+
+                            return (
+                              <div key={active.id} className={`flex flex-col rounded-lg border relative transition-all duration-300 overflow-hidden shrink-0 ${isSpawned ? 'bg-green-500/10 border-green-500/30' : isFloating ? 'bg-yellow-500/10 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : isRekilled ? 'bg-purple-900/20 border-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.1)]' : 'bg-gray-800 border-gray-700'}`}>
+                                {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
+                                
+                                <div className="flex items-center justify-between p-1 sm:p-1.5 relative z-10 w-full">
+                                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                                    <div 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (active.memo) setExpandedMemoId(isExpanded ? null : active.id);
+                                      }}
+                                      className={`relative flex items-center justify-center border rounded px-2 sm:px-3 py-0.5 sm:py-1 min-w-[3rem] sm:min-w-[4rem] shrink-0 transition-colors ${active.memo ? 'cursor-pointer hover:brightness-125' : ''} ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : isRekilled ? 'bg-purple-900/50 border-purple-500/50' : 'bg-gray-900 border-gray-600'}`}
+                                      title={active.memo ? "點擊顯示備註" : ""}
+                                    >
+                                      <div className={`font-bold leading-none flex items-baseline justify-center ${isSpawned ? 'text-green-400' : isFloating ? 'text-yellow-400' : isWarning ? 'text-red-400' : isRekilled ? 'text-purple-400' : 'text-blue-400'}`}>
+                                        <span className="text-[13px] sm:text-[15px]">{active.channel}</span>
+                                      </div>
+                                      {active.memo && (
+                                        <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-3 h-3 flex items-center justify-center rounded-full shadow-[0_0_5px_rgba(239,68,68,0.8)] border border-gray-800">
+                                          !
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] sm:text-[11px] text-gray-400 flex items-center gap-1 min-w-0">
+                                      <span className="flex items-center gap-1 text-gray-300 whitespace-nowrap">
+                                        <History className="w-3 h-3 shrink-0"/> 
+                                        {new Date(active.lastKilled).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                                        <span className="text-blue-300/80 ml-1 font-medium inline-block max-w-[50px] sm:max-w-none truncate align-bottom" title={active.reporterName}>({active.reporterName || '未知'})</span>
+                                      </span>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 relative z-10 shrink-0 ml-1">
+                                    {isWarning && <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-red-500 animate-bounce mr-1" />}
+                                    
+                                    <span className={`text-[11px] sm:text-xs mr-1 ${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300' : 'text-gray-300'}`}>
+                                       <CountdownTimer nextSpawnTime={active.nextSpawn} maxSpawnTime={active.maxSpawn} />
+                                    </span>
+                                    
+                                    <div className="flex items-center gap-1">
+                                        {isFloating && (
+                                          <button onClick={(e) => { e.stopPropagation(); handleLocalPatrol(active.id); }} className={`w-6 h-6 sm:w-7 sm:h-7 rounded text-[10px] sm:text-xs transition-colors flex items-center justify-center shrink-0 border ${localPatrols[active.id] ? 'bg-cyan-600/20 text-cyan-400 border-cyan-500/30' : 'bg-gray-700/50 text-gray-400 border-gray-600/50 hover:bg-gray-600'}`} title={localPatrols[active.id] ? `您於 ${new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})} 標記檢查` : "標記個人巡邏 (無讀取消耗, 僅自己可見)"}>
+                                            ⌛
+                                          </button>
+                                        )}
+
+                                        {showActionButtons && (
+                                          <>
+                                            <button onClick={(e) => { e.stopPropagation(); handleQuickReportKill(active); }} className="w-6 h-6 sm:w-7 sm:h-7 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded text-xs transition-colors flex items-center justify-center shrink-0" title="再次擊殺">⚔️</button>
+                                            
+                                            {isSpawned ? (
+                                              <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id, true); }} className="h-6 sm:h-7 px-1.5 sm:px-2 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded text-[11px] sm:text-xs font-bold transition-colors flex items-center justify-center whitespace-nowrap shrink-0">無王</button>
+                                            ) : group.enablePatrol ? (
+                                              <button 
+                                                onClick={(e) => { e.stopPropagation(); setPatrolModalData(active); }} 
+                                                className="w-6 h-6 sm:w-7 sm:h-7 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-500/30 rounded transition-colors flex items-center justify-center relative shrink-0" 
+                                                title={active.patrolHistory && active.patrolHistory.length > 0 ? "開啟巡邏視窗 (已有巡邏紀錄)" : "開啟巡邏視窗"}
+                                              >
+                                                <Search className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                                {active.patrolHistory && active.patrolHistory.length > 0 && (
+                                                  <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-purple-400"></span>
+                                                  </span>
+                                                )}
+                                              </button>
+                                            ) : null}
+                                          </>
+                                        )}
+                                    </div>
+
+                                    {canDelete && !isSpawned && (
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id, false); }} className={`w-6 h-6 sm:w-7 sm:h-7 rounded transition-colors border border-transparent flex items-center justify-center shrink-0 ml-0.5 ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
+                                        <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                
+                                {isExpanded && active.memo && (
+                                  <div className="bg-gray-900/50 border-t border-gray-700/50 p-1 sm:p-1.5 text-[11px] sm:text-xs text-gray-300 animate-in slide-in-from-top-1 px-2 sm:px-3">
+                                    <span className="text-gray-500 font-bold mr-1.5 select-none">備註:</span>
+                                    <span className="break-all">{active.memo}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          
+                          {totalPages > 1 && (
+                            <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-700/50 shrink-0 gap-1 sm:gap-2">
+                              <div className="flex gap-1">
+                                <button onClick={() => setModalPage(1)} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">首頁</button>
+                                <button onClick={() => setModalPage(p => Math.max(1, p - 1))} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">上一頁</button>
+                              </div>
+                              <span className="text-gray-400 text-xs font-medium whitespace-nowrap">第 {safePage} / {totalPages} 頁</span>
+                              <div className="flex gap-1">
+                                <button onClick={() => setModalPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">下一頁</button>
+                                <button onClick={() => setModalPage(totalPages)} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">末頁</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -1086,36 +1348,398 @@
           })()}
 
           <div className="max-w-6xl mx-auto space-y-6">
-            <header className="flex items-center justify-between bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700">
-               <h1 className="text-2xl font-bold">Waku野王計時</h1>
-               <button onClick={onLogout} className="bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg font-bold">登出</button>
+            
+            <header className="flex flex-col md:flex-row md:items-center justify-between bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700 gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-gray-900 rounded-xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg shrink-0">
+                  <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時器</h1>
+                  <p className="text-gray-400 text-sm mt-1">目前身份：<span className={isAdmin ? 'text-purple-400 font-bold' : 'text-green-400 font-bold'}>{isAdmin ? '管理員' : '一般會員'}</span></p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 border-t md:border-t-0 border-gray-700 pt-4 md:pt-0">
+                <span className="text-gray-300 text-sm">歡迎, <span className="font-bold text-white text-base">{appUser.username}</span></span>
+                <button onClick={() => setShowPwdModal(true)} className="ml-2 bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"><KeyRound className="w-4 h-4"/> 密碼</button>
+                <button onClick={onLogout} className="bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"><LogOut className="w-4 h-4"/> 登出</button>
+              </div>
             </header>
 
-            <section className="bg-gray-800 p-6 rounded-2xl border border-blue-500/30">
-               <h2 className="text-lg font-bold mb-4 flex items-center gap-2"><Crosshair className="text-blue-400"/> 回報擊殺</h2>
-               <form onSubmit={handleReportKill} className="flex flex-wrap gap-3">
-                  <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-3" required>
-                    {bossTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                  <input type="number" value={channelInput} onChange={e=>setChannelInput(e.target.value)} placeholder="分流" className="w-20 bg-gray-900 border border-gray-700 rounded-lg px-3 py-3" required />
-                  <button type="submit" className="bg-blue-600 px-6 py-3 rounded-lg font-bold">開始倒數</button>
-               </form>
-            </section>
+            {isAdmin && (
+              <section className="bg-gray-800 p-6 rounded-2xl shadow-lg border border-purple-500/30 ring-1 ring-purple-500/20 animate-in fade-in duration-300">
+                <div className="flex items-center gap-2 mb-6 border-b border-gray-700 pb-4 overflow-x-auto">
+                  <button onClick={() => setAdminTab('home')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'home' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
+                    <MapPin className="w-4 h-4"/> 擊殺登記 / 狀態
+                  </button>
+                  <button onClick={() => setAdminTab('boss')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'boss' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
+                    <Crosshair className="w-4 h-4"/> BOSS 管理
+                  </button>
+                  <button onClick={() => setAdminTab('users')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'users' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700 relative'}`}>
+                    <Users className="w-4 h-4"/> 會員管理
+                    {allUsers.filter(u => u.status === 'pending').length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-gray-800"></span>
+                    )}
+                  </button>
+                  <button onClick={() => setAdminTab('system')} className={`px-4 py-2 rounded-lg text-sm font-bold flex shrink-0 items-center gap-2 transition-colors ${adminTab === 'system' ? 'bg-purple-600 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>
+                    <Settings className="w-4 h-4"/> 系統控制
+                  </button>
+                </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {displayBosses.map(group => {
-                const isGlobalSpawned = group.effectiveGlobalSpawn === 0 || (group.effectiveGlobalMaxSpawn !== null && group.effectiveGlobalMaxSpawn <= Date.now());
-                return (
-                  <div key={group.id} onClick={() => setActiveModalBossId(group.id)} className={`bg-gray-800 p-4 rounded-2xl border ${isGlobalSpawned && group.channels.length === 0 ? 'border-green-500/40' : 'border-gray-700'} cursor-pointer hover:scale-[1.01] transition-transform`}>
-                    <div className="flex justify-between items-center">
-                       <h3 className="text-xl font-bold">{group.name}</h3>
-                       {group.channels.length > 0 && <span className="text-xs bg-blue-900 text-blue-200 px-2 py-1 rounded">{group.channels.length} 分流</span>}
+                {adminTab === 'boss' ? (
+                  <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-6 gap-4">
+                      <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-700/50 p-2 -ml-2 rounded-lg transition-colors select-none" onClick={() => setShowBossForm(!showBossForm)}>
+                        <h2 className="text-lg font-semibold flex items-center gap-2 text-purple-400">
+                          <UserCog className="w-5 h-5" />
+                          {editingTemplateId ? '編輯 BOSS 種類' : '設定 BOSS 種類與外觀'}
+                        </h2>
+                        {showBossForm ? <ChevronUp className="w-5 h-5 text-purple-400" /> : <ChevronDown className="w-5 h-5 text-purple-400" />}
+                      </div>
+                      
+                      <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3">
+                        <div className="flex flex-col items-end">
+                           <label className="text-[11px] text-gray-400 mb-0.5">自訂基準時間 (維修重置用，留空為現在)</label>
+                           <input type="datetime-local" value={globalBaseTime} onChange={e=>setGlobalBaseTime(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-purple-500" />
+                        </div>
+                        <button onClick={handleResetAllBosses} disabled={isResettingGlobal} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 h-[38px] mt-1 sm:mt-0 w-full sm:w-auto">
+                          {isResettingGlobal ? <Activity className="w-4 h-4 animate-spin"/> : <RefreshCw className="w-4 h-4"/>} 全域重置
+                        </button>
+                      </div>
                     </div>
-                    <div className="mt-2"><CountdownTimer nextSpawnTime={group.earliestSpawn} maxSpawnTime={group.earliestMaxSpawn} /></div>
+                    
+                    {showBossForm && (
+                      <form onSubmit={handleSaveTemplate} className="flex flex-col gap-4 mb-6 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+                        <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                          <div className="shrink-0 flex flex-col items-center">
+                            <label className="block text-sm text-gray-400 mb-1 w-full text-left">外觀圖</label>
+                            <label className="flex items-center justify-center w-16 h-16 md:w-[76px] md:h-[76px] bg-gray-900 border border-gray-600 border-dashed rounded-xl cursor-pointer hover:border-purple-500 hover:bg-purple-500/10 transition-all overflow-hidden group">
+                              {newTemplateImage ? <img src={newTemplateImage} alt="Preview" className="w-full h-full object-cover" /> : <div className="text-gray-500 group-hover:text-purple-400 flex flex-col items-center"><Upload className="w-5 h-5 mb-0.5" /><span className="text-[10px]">上傳</span></div>}
+                              <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                            </label>
+                          </div>
+                          
+                          <div className="flex-1 w-full grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="col-span-2 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">BOSS 名稱</label>
+                              <input type="text" value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder="例如: 巴洛古" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" required />
+                            </div>
+                            <div className="col-span-2 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">等級 (Lv)</label>
+                              <input type="number" min="1" value={newTemplateLevel} onChange={(e) => setNewTemplateLevel(e.target.value)} placeholder="例如: 80" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" />
+                            </div>
+                            <div className="col-span-1 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">最小CD(分)</label>
+                              <input type="number" min="1" value={newTemplateMinCD} onChange={(e) => setNewTemplateMinCD(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" required />
+                            </div>
+                            <div className="col-span-1 md:col-span-1">
+                              <label className="block text-sm text-gray-400 mb-1">最大CD(分)</label>
+                              <input type="number" min="1" value={newTemplateMaxCD} onChange={(e) => setNewTemplateMaxCD(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" required />
+                            </div>
+                            <div className="col-span-2 md:col-span-4 flex items-center mt-1">
+                              <label className="flex items-center gap-2.5 cursor-pointer bg-gray-800/50 px-3.5 py-2.5 rounded-lg border border-gray-700/50 hover:border-purple-500/50 transition-colors w-full sm:w-auto">
+                                <input type="checkbox" checked={newTemplateEnablePatrol} onChange={(e) => setNewTemplateEnablePatrol(e.target.checked)} className="w-4 h-4 accent-purple-500 rounded bg-gray-900 border-gray-600" />
+                                <span className="text-sm text-gray-300">開啟「巡邏簽到」功能 <span className="text-gray-500 text-xs ml-1">(浮動時間較長的王適用)</span></span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-end gap-2 border-t border-gray-800 pt-3 mt-1">
+                          {editingTemplateId && <button type="button" onClick={handleCancelEdit} className="bg-gray-700 hover:bg-gray-600 text-white font-medium px-4 py-2 rounded-lg transition-colors flex items-center justify-center">取消</button>}
+                          <button type="submit" disabled={isAddingTemplate} className="bg-purple-600 hover:bg-purple-500 text-white font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-900/20">
+                            {isAddingTemplate ? <Activity className="w-5 h-5 animate-spin" /> : (editingTemplateId ? '儲存修改' : '新增種類')}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    <div className="flex justify-between items-center pt-4 border-t border-gray-700 mb-4">
+                       <h3 className="text-gray-300 font-bold ml-1">現有 BOSS ({bossTemplates.length})</h3>
+                       <select value={adminSortOrder} onChange={(e) => setAdminSortOrder(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500">
+                         <option value="name">依名稱排序</option>
+                         <option value="levelDesc">等級 (高到低)</option>
+                         <option value="levelAsc">等級 (低到高)</option>
+                       </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {sortedAdminTemplates.map(template => (
+                        <div key={template.id} className="flex flex-col bg-gray-900 border border-gray-700 rounded-xl p-4 gap-3 relative hover:border-purple-500/50 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              {template.imageUrl ? <img src={template.imageUrl} alt={template.name} className="w-10 h-10 rounded-full object-cover border border-gray-700 bg-gray-800" /> : <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center border border-gray-700"><ImageIcon className="w-5 h-5 text-gray-500" /></div>}
+                              <div className="flex flex-col">
+                                <span className="font-bold text-gray-200">
+                                  {template.name} {template.level && <span className="text-yellow-400 text-sm ml-1">Lv.{template.level}</span>}
+                                </span>
+                                <span className="text-gray-500 text-xs">CD: {template.minCooldown || template.cooldownMinutes}{template.maxCooldown && template.maxCooldown !== (template.minCooldown || template.cooldownMinutes) ? `~${template.maxCooldown}` : ''}分鐘 {template.enablePatrol && <span className="text-purple-400 ml-1">· 🛡️ 啟用巡邏</span>}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => handleEditClick(template)} className="text-gray-500 hover:text-blue-400 transition-colors p-1.5 rounded bg-gray-800 hover:bg-gray-700"><Edit2 className="w-4 h-4" /></button>
+                              <button onClick={() => handleDeleteTemplate(template.id)} className="text-gray-500 hover:text-red-400 transition-colors p-1.5 rounded bg-gray-800 hover:bg-gray-700"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 pt-3 border-t border-gray-800">
+                            <button onClick={() => handleGlobalResetSingle(template)} className="flex-1 flex items-center justify-center gap-1 text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 px-2 py-1.5 rounded transition-colors" title="套用上方自訂基準時間"><RefreshCw className="w-3 h-3"/> 維修重置</button>
+                            <button onClick={() => handleGlobalSpawnSingle(template)} className="flex-1 flex items-center justify-center gap-1 text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 px-2 py-1.5 rounded transition-colors"><CheckCircle className="w-3 h-3"/> 標記重生</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                ) : adminTab === 'users' ? (
+                  <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-3">
+                     <div className="flex items-center justify-between cursor-pointer hover:bg-gray-700/50 p-2 -mx-2 rounded-lg transition-colors select-none mb-2" onClick={() => setShowUserList(!showUserList)}>
+                       <h2 className="text-lg font-semibold flex items-center gap-2 text-purple-400"><Users className="w-5 h-5" /> 系統註冊會員 ({allUsers.length})</h2>
+                       {showUserList ? <ChevronUp className="w-5 h-5 text-purple-400" /> : <ChevronDown className="w-5 h-5 text-purple-400" />}
+                     </div>
+                     
+                     {showUserList && (
+                       allUsers.length === 0 ? (
+                         <p className="text-gray-500 text-center py-6">目前尚無其他會員。</p>
+                       ) : (
+                         allUsers.map(u => <AdminUserRow key={u.id} user={u} appUser={appUser} showMessage={showMessage} requestConfirm={requestConfirm} />)
+                       )
+                     )}
+                  </div>
+                ) : adminTab === 'system' ? (
+                  <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-6">
+                    
+                    <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
+                       <h3 className="text-lg font-bold text-green-400 mb-2 flex items-center gap-2"><Trash2 className="w-5 h-5"/> 自動清除過期紀錄</h3>
+                       <p className="text-sm text-gray-400 mb-4 leading-relaxed">
+                         開啟此功能後，只要有任何一位<span className="text-white">管理員的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
+                         <span className="text-yellow-400 text-xs">注意：背景檢查是用網頁上的記憶體計算，消耗 0 次讀取量。此設定為全域同步。</span>
+                       </p>
+                       <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-gray-800 p-4 rounded-lg border border-gray-700">
+                          <label className="flex items-center gap-2.5 cursor-pointer shrink-0">
+                            <input 
+                               type="checkbox" 
+                               checked={sysSettings.autoClearEnabled} 
+                               onChange={e => handleUpdateSysSettings({ autoClearEnabled: e.target.checked })} 
+                               className="w-5 h-5 accent-green-500 rounded border-gray-600 bg-gray-700 cursor-pointer" 
+                            />
+                            <span className="text-base text-gray-200 font-bold">啟用自動清除</span>
+                          </label>
+                          <div className="h-8 w-px bg-gray-600 hidden sm:block"></div>
+                          <div className="flex flex-wrap items-center gap-2">
+                             <span className="text-gray-400 text-sm">王確定重生</span>
+                             <select 
+                               value={sysSettings.autoClearHours || 4} 
+                               onChange={e => handleUpdateSysSettings({ autoClearHours: Number(e.target.value) })}
+                               disabled={!sysSettings.autoClearEnabled}
+                               className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-green-500 disabled:opacity-50"
+                             >
+                                <option value={1}>1 小時</option>
+                                <option value={2}>2 小時</option>
+                                <option value={3}>3 小時</option>
+                                <option value={4}>4 小時</option>
+                                <option value={8}>8 小時</option>
+                                <option value={12}>12 小時</option>
+                             </select>
+                             <span className="text-gray-400 text-sm">後自動刪除，</span>
+                             
+                             <span className="text-gray-400 text-sm">掃描頻率：每</span>
+                             <select 
+                               value={sysSettings.autoClearInterval || 1} 
+                               onChange={e => handleUpdateSysSettings({ autoClearInterval: Number(e.target.value) })}
+                               disabled={!sysSettings.autoClearEnabled}
+                               className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-green-500 disabled:opacity-50"
+                             >
+                                <option value={1}>1 分鐘</option>
+                                <option value={5}>5 分鐘</option>
+                                <option value={15}>15 分鐘</option>
+                                <option value={30}>30 分鐘</option>
+                                <option value={60}>60 分鐘</option>
+                             </select>
+                             <span className="text-gray-400 text-sm">檢查一次</span>
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
+                      <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2"><Server className="w-5 h-5 text-red-400"/> 緊急維護與強制踢人</h3>
+                      <p className="text-sm text-gray-400 mb-4 leading-relaxed">
+                        當系統正在維修，或者發現 Firebase 讀取量異常飆升時，可以使用以下功能強制中斷用戶的連線。<br/>
+                        <span className="text-yellow-400 font-medium">注意：若是「舊版客戶端」的用戶沒有實裝最新的強制登出功能，唯一能踢除他們的辦法是「一鍵全體停權」，這會讓他們退回審核畫面並立即中斷資料庫監聽。</span>
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                         <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 flex flex-col gap-3">
+                           <h4 className="font-bold text-red-400 flex items-center gap-1.5"><Ban className="w-4 h-4"/> 針對舊版/所有用戶 (最有效)</h4>
+                           <p className="text-xs text-gray-400 flex-1 leading-relaxed">將除了您以外的<span className="text-white">非管理員會員</span>狀態改為「審核中」，這會強制所有用戶(包含舊版本)退回審核畫面，立即停止對王列表的讀取。處理完畢後再一鍵開通即可。</p>
+                           <div className="flex gap-2 mt-2">
+                             <button onClick={handleSuspendAll} disabled={isReporting} className="flex-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors">一鍵全體停權</button>
+                             <button onClick={handleApproveAll} disabled={isReporting} className="flex-1 bg-green-600/20 hover:bg-green-600/40 text-green-400 border border-green-500/30 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors">一鍵全體開通</button>
+                           </div>
+                         </div>
+
+                         <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 flex flex-col gap-3">
+                           <h4 className="font-bold text-purple-400 flex items-center gap-1.5"><Power className="w-4 h-4"/> 針對新版用戶 (溫和登出)</h4>
+                           <p className="text-xs text-gray-400 flex-1 leading-relaxed">發送強制登出訊號，擁有最新版本程式碼的用戶會自動被登出並清除本機登入紀錄。<span className="text-yellow-500">對舊版本用戶無效。</span></p>
+                           <button onClick={handleForceLogoutAll} disabled={isReporting} className="mt-2 w-full bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 border border-purple-500/30 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"><Power className="w-4 h-4"/> 發送強制登出訊號</button>
+                         </div>
+                         
+                         <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 flex flex-col gap-3">
+                           <h4 className="font-bold text-blue-400 flex items-center gap-1.5"><RefreshCw className="w-4 h-4"/> 針對新版用戶 (強制重整)</h4>
+                           <p className="text-xs text-gray-400 flex-1 leading-relaxed">發送強制網頁重整訊號，擁有最新版本程式碼的用戶網頁將會自動刷新 (F5)，可確保他們獲取最新的介面與設定。<span className="text-yellow-500">對舊版本用戶無效。</span></p>
+                           <button onClick={handleForceRefreshAll} disabled={isReporting} className="mt-2 w-full bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4"/> 發送強制重整訊號</button>
+                         </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            )}
+
+            {(!isAdmin || adminTab === 'home') && (
+              <>
+                <section className={`bg-gray-800/95 backdrop-blur-xl rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.6)] border border-blue-500/30 relative z-[40] sticky top-2 md:top-4 animate-in fade-in duration-300 transition-all ${isReportFormCollapsed ? 'p-4' : 'p-5 sm:p-6'}`}>
+                  <div className="flex justify-between items-center cursor-pointer select-none" onClick={() => setIsReportFormCollapsed(!isReportFormCollapsed)}>
+                    <h2 className="text-lg font-semibold flex items-center gap-2 text-blue-400">
+                      <Crosshair className="w-5 h-5" />
+                      回報擊殺紀錄
+                    </h2>
+                    <button type="button" className="text-blue-400 p-1.5 hover:bg-gray-700/50 rounded-lg transition-colors" title={isReportFormCollapsed ? "展開表單" : "收起表單"}>
+                      {isReportFormCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                    </button>
+                  </div>
+                  
+                  {!isReportFormCollapsed && (
+                    <div className="mt-4 pt-4 border-t border-gray-700/50 animate-in slide-in-from-top-2">
+                      {bossTemplates.length === 0 ? (
+                        <div className="text-center py-6 text-gray-400 bg-gray-900 rounded-lg border border-gray-700">
+                          系統目前尚未設定任何 BOSS 種類。
+                        </div>
+                      ) : (
+                        <form onSubmit={handleReportKill} className="flex flex-wrap gap-3 items-end">
+                          
+                          <div className="w-full sm:flex-1 min-w-[140px] max-w-full sm:max-w-[200px] shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">搜尋王</label>
+                            <div className="relative">
+                              <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="輸入關鍵字..." className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
+                            </div>
+                          </div>
+                          
+                          <div className="w-full sm:flex-[2] min-w-[200px] max-w-full shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">選擇 BOSS</label>
+                            <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" required>
+                              {filteredTemplates.length > 0 ? filteredTemplates.map(t => <option key={t.id} value={t.id}>{t.name} {t.level ? `Lv.${t.level}` : ''} (CD: {t.minCooldown || t.cooldownMinutes}{t.maxCooldown && t.maxCooldown !== (t.minCooldown || t.cooldownMinutes) ? `~${t.maxCooldown}` : ''}分)</option>) : <option value="">找不到符合的王</option>}
+                            </select>
+                          </div>
+                          
+                          <div className="w-[80px] shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">分流</label>
+                            <input type="number" min="1" value={channelInput} onChange={(e) => setChannelInput(e.target.value)} placeholder="數字" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center" required />
+                          </div>
+                          
+                          <div className="flex-1 min-w-[120px] max-w-full sm:max-w-[200px] shrink-0">
+                            <label className="block text-sm text-gray-400 mb-1">備註 (選填)</label>
+                            <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="掉落等..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px]" />
+                          </div>
+                          
+                          <div className="w-full sm:w-auto shrink-0 flex gap-1">
+                             <div className="w-[75px] shrink-0">
+                               <label className="block text-sm text-gray-400 mb-1">日期</label>
+                               <select value={killDateSelect} onChange={e=>setKillDateSelect(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-1 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] text-center">
+                                 <option value="today">今天</option>
+                                 <option value="yesterday">昨天</option>
+                               </select>
+                             </div>
+                             <div className="flex-1 sm:w-[140px] shrink-0 relative">
+                               <label className="block text-sm text-gray-400 mb-1">擊殺時間 (選填)</label>
+                               <input type="time" step="1" value={killTimeInput} onChange={(e) => setKillTimeInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 sm:px-3 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all h-[48px] sm:h-[52px] [color-scheme:dark]" title="若空白則預設為現在" />
+                             </div>
+                          </div>
+
+                          <div className="w-full lg:w-auto shrink-0 mt-1 sm:mt-0">
+                            <button type="submit" disabled={isReporting || !selectedTemplateId} className="w-full lg:min-w-[120px] bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-3 h-[48px] sm:h-[52px] rounded-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center shadow-lg shadow-blue-900/20 whitespace-nowrap">
+                              {isReporting ? '處理中' : '開始倒數'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-4 animate-in fade-in duration-300">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                      <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2">
+                        <Clock className="w-6 h-6 text-yellow-500" />
+                        各頻道 BOSS 狀態
+                      </h2>
+                      <div className="flex items-center gap-3 text-[11px] font-medium text-gray-400 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 flex-wrap">
+                        <span className="flex items-center gap-1 text-red-400"><div className="w-2 h-2 rounded bg-red-500/80"></div> 準備重生了</span>
+                        <span className="flex items-center gap-1 text-yellow-400"><div className="w-2 h-2 rounded bg-yellow-500/80"></div> 可能重生頻道</span>
+                        <span className="flex items-center gap-1 text-purple-400"><div className="w-2 h-2 rounded bg-purple-500/80"></div> 再次擊殺頻道</span>
+                      </div>
+                    </div>
+                    <select value={bossSort} onChange={e=>setBossSort(e.target.value)} className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full sm:w-auto">
+                      <option value="levelAsc">等級低到高</option>
+                      <option value="levelDesc">等級高到低</option>
+                      <option value="earliest">CD時間排序</option>
+                      <option value="hasRecordOnly">顯示有紀錄Boss</option>
+                    </select>
+                  </div>
+
+                  {displayBosses.length === 0 ? (
+                    <div className="text-center py-16 bg-gray-800 rounded-2xl border border-gray-700 border-dashed">
+                      <Skull className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-400">目前沒有符合條件的重生資訊。</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {displayBosses.map(group => {
+                        const isPinned = pinnedBosses.includes(group.id);
+                        
+                        const currentNow = Date.now();
+                        const warningCount = group.channels.filter(ch => {
+                          const diff = ch.nextSpawn - currentNow;
+                          return diff > 0 && diff <= 10 * 60 * 1000;
+                        }).length;
+
+                        // 判斷是否為全域重生狀態
+                        const isGlobalSpawned = group.effectiveGlobalSpawn === 0 || (group.effectiveGlobalMaxSpawn !== null && group.effectiveGlobalMaxSpawn <= currentNow);
+
+                        return (
+                          <div key={group.id} onClick={() => setActiveModalBossId(group.id)} className={`bg-gray-800 rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer hover:scale-[1.01] active:scale-[0.99] relative ${warningCount > 0 ? 'border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : isGlobalSpawned && group.channels.length === 0 ? 'border-green-500/40 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-gray-700 hover:border-gray-500'} ${isPinned ? 'ring-1 ring-yellow-500/30 bg-gray-800/90' : ''}`}>
+                            
+                            <button onClick={(e) => togglePin(e, group.id)} className="absolute top-2 right-2 p-1.5 rounded-full bg-gray-900/50 hover:bg-gray-700 transition-colors z-20 group" title={isPinned ? "取消釘選" : "釘選置頂"}>
+                               <Star className={`w-4 h-4 transition-all ${isPinned ? 'fill-yellow-500 text-yellow-500' : 'text-gray-500 group-hover:text-yellow-400'}`} />
+                            </button>
+
+                            <div className="p-4 sm:p-5 flex items-center justify-between select-none bg-gray-800 hover:bg-gray-750 transition-colors">
+                              <div className="flex items-center gap-4">
+                                <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${warningCount > 0 ? 'border-red-500/40' : isGlobalSpawned && group.channels.length === 0 ? 'border-green-500/40' : 'border-gray-700'}`}>
+                                  {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${warningCount > 0 ? 'text-red-400' : isGlobalSpawned && group.channels.length === 0 ? 'text-green-400' : 'text-gray-500'}`} />}
+                                </div>
+                                <div>
+                                  <h3 className="text-lg sm:text-xl font-bold text-white flex items-center flex-wrap gap-2 pr-6">
+                                    {group.name} {group.level && <span className="text-yellow-400 text-sm sm:text-base">Lv.{group.level}</span>}
+                                    {group.channels.length > 0 && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">{group.channels.length} 分流</span>}
+                                    {warningCount > 0 && <span className="text-[11px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse">{warningCount} 將重生</span>}
+                                  </h3>
+                                  <div className="text-sm mt-1 flex items-center gap-1.5 sm:gap-2">
+                                    <span className="text-gray-400 hidden sm:inline">最快重生:</span>
+                                    <CountdownTimer nextSpawnTime={group.earliestSpawn} maxSpawnTime={group.earliestMaxSpawn} />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
           </div>
         </div>
       );
@@ -1133,30 +1757,71 @@
 
       useEffect(() => {
         const storedUserId = localStorage.getItem('wakuboss_user_id');
-        if (!storedUserId) { setIsCheckingAuth(false); return; }
+        if (!storedUserId) {
+          setIsCheckingAuth(false);
+          return;
+        }
+        
         const unsub = onSnapshot(doc(db, 'users', storedUserId), (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
-            if (data.forceRefresh) { updateDoc(doc(db, 'users', storedUserId), { forceRefresh: false }).then(() => window.location.reload()); }
-            else if (data.forceKicked) { localStorage.removeItem('wakuboss_user_id'); setAppUser(null); updateDoc(doc(db, 'users', storedUserId), { forceKicked: false }); showMessage('已強制登出', 'error'); }
-            else { setAppUser({ id: docSnap.id, ...data }); }
-          } else { setAppUser(null); localStorage.removeItem('wakuboss_user_id'); }
+            
+            if (data.forceRefresh) {
+               updateDoc(doc(db, 'users', storedUserId), { forceRefresh: false })
+                 .then(() => window.location.reload())
+                 .catch(() => window.location.reload());
+            } 
+            else if (data.forceKicked) {
+               localStorage.removeItem('wakuboss_user_id');
+               setAppUser(null);
+               updateDoc(doc(db, 'users', storedUserId), { forceKicked: false }).catch(()=>{});
+               showMessage('管理員已強制將您登出 / 系統維護中', 'error');
+            } else {
+               setAppUser({ id: docSnap.id, ...data });
+            }
+          } else {
+            setAppUser(null);
+            localStorage.removeItem('wakuboss_user_id');
+          }
           setIsCheckingAuth(false);
+        }, (error) => {
+          console.warn("Auth 監聽暫時中斷或網路異常:", error);
         });
+
         return () => unsub();
       }, []);
 
-      const handleLogout = () => { localStorage.removeItem('wakuboss_user_id'); setAppUser(null); };
+      const handleLogout = () => {
+        localStorage.removeItem('wakuboss_user_id');
+        setAppUser(null);
+        showMessage('已成功登出', 'success');
+      };
 
       return (
         <>
           {alertMsg && (
-            <div className={`fixed top-4 right-4 z-[99] px-5 py-4 rounded-xl shadow-2xl flex items-center gap-4 ${alertMsg.type === 'success' ? 'bg-green-900' : 'bg-red-900'}`}>
-              {alertMsg.text}
-              <button onClick={() => setAlertMsg(null)}><X className="w-5 h-5"/></button>
+            <div className={`fixed top-4 right-4 z-[99] px-5 py-4 rounded-xl flex items-center gap-4 shadow-2xl animate-in slide-in-from-top-4 border ${
+              alertMsg.type === 'success' ? 'bg-green-900/90 border-green-500 text-green-100' : 'bg-red-900/90 border-red-500 text-red-100'
+            } bg-gray-900/95`}>
+              <span className="flex items-center gap-2 font-medium">
+                {alertMsg.type === 'success' ? <CheckCircle className="w-5 h-5 text-green-400"/> : <ShieldAlert className="w-5 h-5 text-red-400"/>} 
+                {alertMsg.text}
+              </span>
+              <button onClick={() => setAlertMsg(null)} className="text-white/60 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
             </div>
           )}
-          {isCheckingAuth ? <div className="flex h-screen items-center justify-center"><Activity className="animate-spin w-12 h-12" /></div> : !appUser ? <AuthScreen setAppUser={setAppUser} showMessage={showMessage} /> : appUser.status === 'pending' ? <PendingScreen onLogout={handleLogout} /> : <MainApp appUser={appUser} onLogout={handleLogout} showMessage={showMessage} />}
+
+          {isCheckingAuth ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <Activity className="w-12 h-12 text-blue-500 animate-spin" />
+            </div>
+          ) : !appUser ? (
+            <AuthScreen setAppUser={setAppUser} showMessage={showMessage} />
+          ) : appUser.status === 'pending' ? (
+            <PendingScreen onLogout={handleLogout} />
+          ) : (
+            <MainApp appUser={appUser} onLogout={handleLogout} showMessage={showMessage} />
+          )}
         </>
       );
     }
