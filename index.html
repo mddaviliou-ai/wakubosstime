@@ -450,23 +450,32 @@
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
 
       useEffect(() => {
-        if (!isAdmin || !sysSettings.autoClearEnabled || isSleeping) return;
+        // 修正：移除 isAdmin 的限制，讓所有在線玩家都能幫忙清理
+        if (!sysSettings.autoClearEnabled || isSleeping) return;
         
         const checkIntervalMs = (sysSettings.autoClearInterval || 1) * 60 * 1000;
         
         const interval = setInterval(() => {
           const now = Date.now();
           const limitMs = (sysSettings.autoClearHours || 4) * 60 * 60 * 1000;
-          activeBossesRef.current.forEach(active => {
-            const spawnTime = active.maxSpawn || active.nextSpawn;
-            if (now - spawnTime >= limitMs) {
-              deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
-            }
-          });
+          
+          // 加入隨機延遲 (0~10秒)，避免所有在線玩家在同一毫秒發送刪除請求
+          const randomDelay = Math.floor(Math.random() * 10000); 
+          
+          setTimeout(() => {
+            activeBossesRef.current.forEach(active => {
+              const spawnTime = active.maxSpawn || active.nextSpawn;
+              if (now - spawnTime >= limitMs) {
+                // 發送刪除指令。如果有玩家已經先刪掉了，Firebase 會忽略這次請求，不會報錯。
+                deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
+              }
+            });
+          }, randomDelay);
+
         }, checkIntervalMs); 
         
         return () => clearInterval(interval);
-      }, [isAdmin, sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
+      }, [sysSettings.autoClearEnabled, sysSettings.autoClearHours, sysSettings.autoClearInterval, isSleeping]);
 
 
       const parseKillTime = (timeStr, dateOption) => {
