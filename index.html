@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
   <title>Waku野王重生計時</title>
   <meta property="og:type" content="website">
@@ -26,6 +26,13 @@
     ::-webkit-scrollbar-thumb { background: rgba(75, 85, 99, 0.6); border-radius: 10px; }
     ::-webkit-scrollbar-thumb:hover { background: rgba(107, 114, 128, 0.9); }
     * { scrollbar-width: thin; scrollbar-color: rgba(75, 85, 99, 0.6) transparent; }
+
+    /* 防止 iOS 點擊輸入框時自動放大 (字體小於 16px 時會觸發 auto-zoom) */
+    @media screen and (max-width: 767px) {
+      input, select, textarea {
+        font-size: 16px !important;
+      }
+    }
   </style>
 
   <script type="importmap">
