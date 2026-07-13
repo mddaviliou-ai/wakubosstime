@@ -112,7 +112,7 @@
       const [uName, setUName] = useState(user.username);
       const [uPwd, setUPwd] = useState(user.password);
       const [canClearStale, setCanClearStale] = useState(user.canClearStale || false);
-      const [canClearAll, setCanClearAll] = useState(user.canClearAll || false); // 新增全清權限狀態
+      const [canClearAll, setCanClearAll] = useState(user.canClearAll || false);
       const [showPwd, setShowPwd] = useState(false);
       const isSelf = user.id === appUser.id;
 
@@ -123,7 +123,7 @@
             username: uName.trim(), 
             password: uPwd.trim(),
             canClearStale: canClearStale,
-            canClearAll: canClearAll // 儲存全清權限
+            canClearAll: canClearAll
           });
           showMessage(`已更新 ${uName} 的資料`, 'success');
         } catch (e) { showMessage('更新失敗', 'error'); }
@@ -329,7 +329,7 @@
     function MainApp({ appUser, onLogout, showMessage }) {
       const isAdmin = appUser.role === 'admin';
       const canDeleteStale = isAdmin || appUser.canClearStale;
-      const canDeleteAll = isAdmin || appUser.canClearAll; // 確認是否有清空單王全部紀錄權限
+      const canDeleteAll = isAdmin || appUser.canClearAll;
       
       const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, message: '', onConfirm: null });
       const requestConfirm = (message, onConfirm) => {
@@ -597,16 +597,23 @@
               effectiveGlobalMaxSpawn = template.globalMaxSpawn || template.globalNextSpawn; 
           }
 
-          let earliest = effectiveGlobalSpawn;
-          let earliestMax = effectiveGlobalMaxSpawn;
-          channels.forEach(ch => {
-            if (earliest === null || ch.nextSpawn < earliest) {
-                earliest = ch.nextSpawn;
-                earliestMax = ch.maxSpawn || ch.nextSpawn;
-            }
-          });
+          let earliest = null;
+          let earliestMax = null;
+          
+          // 修正邏輯：如果底下有任何追蹤的分流，就「絕對優先」顯示分流的最快重生時間，不要被全域維修過期的「確定重生」狀態給蓋掉
+          if (channels.length > 0) {
+            channels.forEach(ch => {
+              if (earliest === null || ch.nextSpawn < earliest) {
+                  earliest = ch.nextSpawn;
+                  earliestMax = ch.maxSpawn || ch.nextSpawn;
+              }
+            });
+          } else {
+            // 如果底下真的沒分流紀錄了，才顯示全域維修/標記的倒數時間
+            earliest = effectiveGlobalSpawn;
+            earliestMax = effectiveGlobalMaxSpawn;
+          }
 
-          // 修正：將全域狀態(維修/標記重生)從 hasRecord 中移除，僅計算「是否有分流紀錄」
           const hasRecord = channels.length > 0;
 
           return { ...template, channels, effectiveGlobalSpawn, effectiveGlobalMaxSpawn, earliestSpawn: earliest, earliestMaxSpawn: earliestMax, hasRecord };
@@ -1195,35 +1202,37 @@
                         </div>
                       </div>
                       
-                      {canDeleteStale && group.channels.length > 0 && (
+                      {(canDeleteStale || canDeleteAll) && group.channels.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap justify-end w-full sm:w-auto mt-2 sm:mt-0">
                           {canDeleteAll && (
                              <button onClick={() => handleClearAllRecords(group)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/60 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/80 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
                                <Trash2 className="w-3.5 h-3.5" /> 清空此王
                              </button>
                           )}
-                          {isAdmin ? (
-                            <>
-                              <select 
-                                 value={staleClearHours} 
-                                 onChange={(e)=>setStaleClearHours(Number(e.target.value))}
-                                 className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-2 outline-none focus:border-red-500/50"
-                              >
-                                 <option value={1}>1小時+</option>
-                                 <option value={2}>2小時+</option>
-                                 <option value={3}>3小時+</option>
-                                 <option value={4}>4小時+</option>
-                                 <option value={8}>8小時+</option>
-                                 <option value={12}>12小時+</option>
-                              </select>
-                              <button onClick={() => handleClearStaleRecords(group, staleClearHours)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
-                                <Trash2 className="w-3.5 h-3.5" /> 清除過期
+                          {canDeleteStale && (
+                            isAdmin ? (
+                              <>
+                                <select 
+                                   value={staleClearHours} 
+                                   onChange={(e)=>setStaleClearHours(Number(e.target.value))}
+                                   className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-2 outline-none focus:border-red-500/50"
+                                >
+                                   <option value={1}>1小時+</option>
+                                   <option value={2}>2小時+</option>
+                                   <option value={3}>3小時+</option>
+                                   <option value={4}>4小時+</option>
+                                   <option value={8}>8小時+</option>
+                                   <option value={12}>12小時+</option>
+                                </select>
+                                <button onClick={() => handleClearStaleRecords(group, staleClearHours)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
+                                  <Trash2 className="w-3.5 h-3.5" /> 清除過期
+                                </button>
+                              </>
+                            ) : (
+                              <button onClick={() => handleClearStaleRecords(group, 4)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
+                                <Trash2 className="w-3.5 h-3.5" /> 清除過期 (4hr+)
                               </button>
-                            </>
-                          ) : (
-                            <button onClick={() => handleClearStaleRecords(group, 4)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
-                              <Trash2 className="w-3.5 h-3.5" /> 清除過期 (4hr+)
-                            </button>
+                            )
                           )}
                         </div>
                       )}
@@ -1736,19 +1745,16 @@
                         const isPinned = pinnedBosses.includes(group.id);
                         
                         const currentNow = Date.now();
-                        // 修改為主頁 Badge 的邏輯：統計進入浮動(黃)或已重生(綠)的頻道總數
+                        // 統計進入浮動(黃)或已重生(綠)的頻道總數
                         const spawnedChannels = group.channels.filter(ch => {
                           const diffToNext = ch.nextSpawn - currentNow;
                           return diffToNext <= 0; // 只要最快重生時間過了，就算是準備重生或已重生
                         });
                         
                         const spawnedCount = spawnedChannels.length;
-                        
-                        // 判斷是否為全域重生狀態
-                        const isGlobalSpawned = group.effectiveGlobalSpawn === 0 || (group.effectiveGlobalMaxSpawn !== null && group.effectiveGlobalMaxSpawn <= currentNow);
 
                         return (
-                          <div key={group.id} onClick={() => setActiveModalBossId(group.id)} className={`bg-gray-800 rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer hover:scale-[1.01] active:scale-[0.99] relative ${spawnedCount > 0 ? 'border-yellow-500/40 shadow-[0_0_10px_rgba(234,179,8,0.1)]' : isGlobalSpawned && group.channels.length === 0 ? 'border-green-500/40 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'border-gray-700 hover:border-gray-500'} ${isPinned ? 'ring-1 ring-yellow-500/30 bg-gray-800/90' : ''}`}>
+                          <div key={group.id} onClick={() => setActiveModalBossId(group.id)} className={`bg-gray-800 rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer hover:scale-[1.01] active:scale-[0.99] relative ${spawnedCount > 0 ? 'border-yellow-500/40 shadow-[0_0_10px_rgba(234,179,8,0.1)]' : 'border-gray-700 hover:border-gray-500'} ${isPinned ? 'ring-1 ring-yellow-500/30 bg-gray-800/90' : ''}`}>
                             
                             <button onClick={(e) => togglePin(e, group.id)} className="absolute top-2 right-2 p-1.5 rounded-full bg-gray-900/50 hover:bg-gray-700 transition-colors z-20 group" title={isPinned ? "取消釘選" : "釘選置頂"}>
                                <Star className={`w-4 h-4 transition-all ${isPinned ? 'fill-yellow-500 text-yellow-500' : 'text-gray-500 group-hover:text-yellow-400'}`} />
@@ -1756,8 +1762,8 @@
 
                             <div className="p-4 sm:p-5 flex items-center justify-between select-none bg-gray-800 hover:bg-gray-750 transition-colors">
                               <div className="flex items-center gap-4">
-                                <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${spawnedCount > 0 ? 'border-yellow-500/40' : isGlobalSpawned && group.channels.length === 0 ? 'border-green-500/40' : 'border-gray-700'}`}>
-                                  {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${spawnedCount > 0 ? 'text-yellow-400' : isGlobalSpawned && group.channels.length === 0 ? 'text-green-400' : 'text-gray-500'}`} />}
+                                <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${spawnedCount > 0 ? 'border-yellow-500/40' : 'border-gray-700'}`}>
+                                  {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${spawnedCount > 0 ? 'text-yellow-400' : 'text-gray-500'}`} />}
                                 </div>
                                 <div>
                                   <h3 className="text-lg sm:text-xl font-bold text-white flex items-center flex-wrap gap-2 pr-6">
