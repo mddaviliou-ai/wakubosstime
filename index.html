@@ -375,6 +375,9 @@
         return saved ? JSON.parse(saved) : {};
       });
 
+      const longPressTimer = useRef(null);
+      const isLongPress = useRef(false);
+
       const [bossSort, setBossSort] = useState(() => localStorage.getItem('wakuboss_sort') || 'levelAsc'); 
       const [adminSortOrder, setAdminSortOrder] = useState('levelDesc'); 
       const [newTemplateName, setNewTemplateName] = useState('');
@@ -507,12 +510,14 @@
       };
 
       const handleLocalPatrol = (activeId) => {
+        const now = Date.now();
         setLocalPatrols(prev => {
-          const next = { ...prev, [activeId]: Date.now() };
+          const next = { ...prev, [activeId]: now };
           localStorage.setItem(`wakuboss_local_patrols_${appUser.id}`, JSON.stringify(next));
           return next;
         });
-        showMessage('已記錄個人巡邏 (不消耗讀取量)', 'success');
+        const timeStr = new Date(now).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false});
+        showMessage(`已記錄巡邏時間為 ${timeStr} (不耗讀取)`, 'success');
       };
 
       useEffect(() => {
@@ -1332,8 +1337,45 @@
                                     
                                     <div className="flex items-center gap-1">
                                         {isFloating && (
-                                          <button onClick={(e) => { e.stopPropagation(); handleLocalPatrol(active.id); }} className={`w-6 h-6 sm:w-7 sm:h-7 rounded text-[10px] sm:text-xs transition-colors flex items-center justify-center shrink-0 border ${localPatrols[active.id] ? 'bg-cyan-600/20 text-cyan-400 border-cyan-500/30' : 'bg-gray-700/50 text-gray-400 border-gray-600/50 hover:bg-gray-600'}`} title={localPatrols[active.id] ? `您於 ${new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})} 標記檢查` : "標記個人巡邏 (無讀取消耗, 僅自己可見)"}>
-                                            ⌛
+                                          <button 
+                                            onClick={(e) => { 
+                                              e.stopPropagation(); 
+                                              if (isLongPress.current) {
+                                                isLongPress.current = false;
+                                                return;
+                                              }
+                                              handleLocalPatrol(active.id); 
+                                            }} 
+                                            onTouchStart={() => {
+                                              isLongPress.current = false;
+                                              if (localPatrols[active.id]) {
+                                                longPressTimer.current = setTimeout(() => {
+                                                  isLongPress.current = true;
+                                                  const timeStr = new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false});
+                                                  showMessage(`⌛ 您上次標記巡邏的時間為 ${timeStr}`, 'success');
+                                                }, 500);
+                                              }
+                                            }}
+                                            onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                                            onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                                            onMouseDown={() => {
+                                              isLongPress.current = false;
+                                              if (localPatrols[active.id]) {
+                                                longPressTimer.current = setTimeout(() => {
+                                                  isLongPress.current = true;
+                                                  const timeStr = new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false});
+                                                  showMessage(`⌛ 您上次標記巡邏的時間為 ${timeStr}`, 'success');
+                                                }, 500);
+                                              }
+                                            }}
+                                            onMouseUp={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                                            onMouseLeave={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                                            onContextMenu={(e) => e.preventDefault()}
+                                            style={{ WebkitTouchCallout: 'none' }}
+                                            className={`w-6 h-6 sm:w-7 sm:h-7 rounded text-[10px] sm:text-xs transition-colors flex items-center justify-center shrink-0 border select-none touch-manipulation ${localPatrols[active.id] ? 'bg-cyan-600/20 text-cyan-400 border-cyan-500/30' : 'bg-gray-700/50 text-gray-400 border-gray-600/50 hover:bg-gray-600'}`} 
+                                            title={localPatrols[active.id] ? `您於 ${new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})} 標記檢查` : "標記個人巡邏 (無讀取消耗, 僅自己可見)"}
+                                          >
+                                            <span>⌛</span>
                                           </button>
                                         )}
 
