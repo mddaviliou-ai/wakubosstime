@@ -39,6 +39,7 @@
     {
       "imports": {
         "react": "https://esm.sh/react@18.2.0",
+        "react-dom": "https://esm.sh/react-dom@18.2.0",
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
         "firebase/app": "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js",
         "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js",
@@ -57,10 +58,12 @@
   <script type="text/babel" data-type="module">
     import React, { useState, useEffect, useMemo, memo, useRef } from 'react';
     import { createRoot } from 'react-dom/client';
+    import { createPortal } from 'react-dom'; // 匯入 createPortal 用於子母畫面渲染
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInAnonymously } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where } from 'firebase/firestore';
-    import { Clock, History, Activity, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff, Power, Ban, Moon, Settings } from 'lucide-react';
+    // 新增 PictureInPicture icon
+    import { Clock, History, Activity, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff, Power, Ban, Moon, Settings, PictureInPicture } from 'lucide-react';
 
     const firebaseConfig = {
       apiKey: "AIzaSyD763KJlKWIEXHCjXcQD3WXxup7DPZbh7Y",
@@ -326,7 +329,8 @@
       );
     }
 
-    function MainApp({ appUser, onLogout, showMessage }) {
+    // 將 alertMsg 與 setAlertMsg 傳入 MainApp，讓 MainApp 也能在 PiP 渲染它
+    function MainApp({ appUser, onLogout, showMessage, alertMsg, setAlertMsg }) {
       const isAdmin = appUser.role === 'admin';
       const canDeleteStale = isAdmin || appUser.canClearStale;
       const canDeleteAll = isAdmin || appUser.canClearAll;
@@ -374,6 +378,10 @@
         const saved = localStorage.getItem(`wakuboss_local_patrols_${appUser.id}`);
         return saved ? JSON.parse(saved) : {};
       });
+
+      // === 子母畫面 (PiP) 狀態 ===
+      const [pipWindow, setPipWindow] = useState(null);
+      const [pipContainer, setPipContainer] = useState(null);
 
       const longPressTimer = useRef(null);
       const isLongPress = useRef(false);
@@ -453,7 +461,6 @@
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
 
       useEffect(() => {
-        // 修正：移除 isAdmin 的限制，讓所有在線玩家都能幫忙清理
         if (!sysSettings.autoClearEnabled || isSleeping) return;
         
         const checkIntervalMs = (sysSettings.autoClearInterval || 1) * 60 * 1000;
@@ -462,14 +469,12 @@
           const now = Date.now();
           const limitMs = (sysSettings.autoClearHours || 4) * 60 * 60 * 1000;
           
-          // 加入隨機延遲 (0~10秒)，避免所有在線玩家在同一毫秒發送刪除請求
           const randomDelay = Math.floor(Math.random() * 10000); 
           
           setTimeout(() => {
             activeBossesRef.current.forEach(active => {
               const spawnTime = active.maxSpawn || active.nextSpawn;
               if (now - spawnTime >= limitMs) {
-                // 發送刪除指令。如果有玩家已經先刪掉了，Firebase 會忽略這次請求，不會報錯。
                 deleteDoc(doc(db, 'activeBosses', active.id)).catch(() => {});
               }
             });
@@ -589,6 +594,57 @@
         });
       }, [bossTemplates, adminSortOrder]);
 
+      // === 子母畫面 (PiP) 啟動功能 ===
+      const handleTogglePiP = async () => {
+        // 檢查瀏覽器是否支援 Document Picture-in-Picture API
+        if (!('documentPictureInPicture' in window)) {
+          showMessage('您的瀏覽器不支援子母畫面 API。請使用桌面版 Chrome 或 Edge 瀏覽器 (v116+)。', 'error');
+          return;
+        }
+
+        // 若已經有開啟 PiP 視窗，則將其關閉
+        if (pipWindow) {
+          pipWindow.close(); // 呼叫 close 會觸發 pagehide 事件來清理狀態
+          return;
+        }
+
+        try {
+          // 請求開啟新的 PiP 視窗
+          const pipWin = await window.documentPictureInPicture.requestWindow({ width: 420, height: 600 });
+          
+          // 複製主視窗的樣式表 (CSS) 到新視窗，確保 UI 外觀一致
+          const styleTags = document.querySelectorAll('style, link[rel="stylesheet"]');
+          styleTags.forEach(tag => pipWin.document.head.appendChild(tag.cloneNode(true)));
+          
+          // 載入 Tailwind 以確保動態產生的 class 能正常渲染
+          const script = document.createElement('script');
+          script.src = "https://cdn.tailwindcss.com";
+          pipWin.document.head.appendChild(script);
+
+          // 建立我們要在 PiP 內掛載 React 元件的容器
+          const container = document.createElement('div');
+          container.id = 'pip-root';
+          // 設定容器的滿版基礎樣式，確保背景顏色與捲軸表現與主畫面一致
+          container.className = 'w-full h-full overflow-y-auto bg-gray-900 text-white flex flex-col';
+          pipWin.document.body.style.margin = '0';
+          pipWin.document.body.style.backgroundColor = '#111827';
+          pipWin.document.body.appendChild(container);
+
+          // 將建立好的視窗與容器存入 state，React 會透過 portal 自動將畫面渲染進去
+          setPipContainer(container);
+          setPipWindow(pipWin);
+
+          // 監聽 PiP 視窗關閉事件 (包含使用者手動點右上角 X 關閉)
+          pipWin.addEventListener('pagehide', () => {
+            setPipWindow(null);
+            setPipContainer(null);
+          });
+        } catch (err) {
+          console.error(err);
+          showMessage('開啟子母畫面失敗，請確認瀏覽器權限。', 'error');
+        }
+      };
+
       useEffect(() => {
         if (filteredTemplates.length > 0) {
           if (!filteredTemplates.find(t => t.id === selectedTemplateId)) {
@@ -614,7 +670,6 @@
           let earliest = null;
           let earliestMax = null;
           
-          // 修正邏輯：如果底下有任何追蹤的分流，就「絕對優先」顯示分流的最快重生時間，不要被全域維修過期的「確定重生」狀態給蓋掉
           if (channels.length > 0) {
             channels.forEach(ch => {
               if (earliest === null || ch.nextSpawn < earliest) {
@@ -623,7 +678,6 @@
               }
             });
           } else {
-            // 如果底下真的沒分流紀錄了，才顯示全域維修/標記的倒數時間
             earliest = effectiveGlobalSpawn;
             earliestMax = effectiveGlobalMaxSpawn;
           }
@@ -838,7 +892,6 @@
           const minCD = template.minCooldown || template.cooldownMinutes || 60;
           const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
           
-          // 清除可能存在的個人巡邏紀錄
           setLocalPatrols(prev => {
             const next = { ...prev };
             delete next[activeBossId];
@@ -877,7 +930,6 @@
             const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
             const killTime = Date.now();
 
-            // 在執行再次擊殺時，一併清除本地的個人巡邏紀錄
             setLocalPatrols(prev => {
               const next = { ...prev };
               delete next[active.id];
@@ -909,11 +961,10 @@
         const currentHistory = active.patrolHistory || [];
         const now = Date.now();
         
-        // 檢查 5 分鐘冷卻時間
         if (currentHistory.length > 0) {
            const lastCheckTime = currentHistory[0].time;
            const diffMs = now - lastCheckTime;
-           const cooldownMs = 5 * 60 * 1000; // 5 分鐘
+           const cooldownMs = 5 * 60 * 1000; 
            
            if (diffMs < cooldownMs) {
                const remainMs = cooldownMs - diffMs;
@@ -925,7 +976,6 @@
 
         try {
           const newRecord = { time: now, userName: appUser.username };
-          // 只保留最近 3 筆紀錄
           const newHistory = [newRecord, ...currentHistory].slice(0, 3);
           
           await updateDoc(doc(db, 'activeBosses', active.id), {
@@ -950,7 +1000,35 @@
             setIsReporting(true);
             await Promise.all(group.channels.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
             showMessage(`已成功清除 ${group.name} 的所有紀錄`, 'success');
-            setActiveModalBossId(null); // 清除後關閉視窗，避免畫面顯示異常
+            if (!pipWindow) setActiveModalBossId(null); // 若不在 PiP 中，清除後關閉視窗
+          } catch (error) {
+            showMessage("清除失敗，請確認權限", "error");
+          } finally {
+            setIsReporting(false);
+          }
+        });
+      };
+      
+      const handleClearStaleRecords = async (group, hours) => {
+        if (!hours) return;
+        const limitMs = hours * 60 * 60 * 1000;
+        const now = Date.now();
+        const targets = group.channels.filter(ch => (now - (ch.maxSpawn || ch.nextSpawn)) >= limitMs);
+
+        if (targets.length === 0) {
+          showMessage(`目前沒有超過 ${hours} 小時的過期紀錄`, 'success');
+          return;
+        }
+
+        requestConfirm(`確定要清除 ${targets.length} 筆已過期超過 ${hours} 小時的紀錄嗎？`, async () => {
+          try {
+            setIsReporting(true);
+            await Promise.all(targets.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
+            showMessage(`已成功清除 ${targets.length} 筆過期紀錄`, 'success');
+            // 如果全部清空了且不在 PiP，則關閉彈窗
+            if (!pipWindow && targets.length === group.channels.length) {
+                setActiveModalBossId(null);
+            }
           } catch (error) {
             showMessage("清除失敗，請確認權限", "error");
           } finally {
@@ -1016,9 +1094,11 @@
         });
       };
 
-      return (
-        <div className="p-4 md:p-8 font-sans">
-          
+      // ==========================================
+      // 共用的對話框渲染函式 (覆蓋主畫面與 PiP)
+      // ==========================================
+      const renderOverlays = (isPip) => (
+        <>
           {isSleeping && (
             <div className="fixed inset-0 z-[999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-500">
               <div className="bg-gray-800 p-8 rounded-3xl border border-gray-700 shadow-2xl flex flex-col items-center max-w-sm text-center animate-in zoom-in-95">
@@ -1127,26 +1207,42 @@
             );
           })()}
 
-          {activeModalBossId && (() => {
-            const group = displayBosses.find(g => g.id === activeModalBossId);
-            if (!group) {
-              setActiveModalBossId(null);
-              return null;
-            }
-            
-            const currentNow = Date.now();
-            // 彈出視窗內的標題 Badge 邏輯也同步修改為統計 浮動/已重生
-            const spawnedCount = group.channels.filter(ch => {
-              const diffToNext = ch.nextSpawn - currentNow;
-              const diffToMax = (ch.maxSpawn || ch.nextSpawn) - currentNow;
-              return diffToNext <= 0 || diffToMax <= 0; // 進入浮動 或 確定重生
-            }).length;
+          {/* 專門為 PiP 視窗渲染的 Alert */}
+          {isPip && alertMsg && (
+            <div className={`fixed top-4 right-4 z-[999] px-5 py-4 rounded-xl flex items-center gap-4 shadow-2xl animate-in slide-in-from-top-4 border ${
+              alertMsg.type === 'success' ? 'bg-green-900/90 border-green-500 text-green-100' : 'bg-red-900/90 border-red-500 text-red-100'
+            } bg-gray-900/95`}>
+              <span className="flex items-center gap-2 font-medium">
+                {alertMsg.type === 'success' ? <CheckCircle className="w-5 h-5 text-green-400"/> : <ShieldAlert className="w-5 h-5 text-red-400"/>} 
+                {alertMsg.text}
+              </span>
+              <button onClick={() => setAlertMsg(null)} className="text-white/60 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+            </div>
+          )}
+        </>
+      );
 
-            return (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-in fade-in">
-                <div className="bg-gray-800 rounded-2xl border border-gray-700 w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+      return (
+        <div className="p-4 md:p-8 font-sans relative">
+          
+          {/* 在主畫面渲染一次所有提示彈窗 */}
+          {renderOverlays(false)}
+
+          {/* === 單王詳細資訊渲染邏輯 (供主視窗與子母畫面共用) === */}
+          {(() => {
+            const renderBossInnerContent = (group, isPipMode) => {
+              const currentNow = Date.now();
+              const spawnedCount = group.channels.filter(ch => {
+                const diffToNext = ch.nextSpawn - currentNow;
+                const diffToMax = (ch.maxSpawn || ch.nextSpawn) - currentNow;
+                return diffToNext <= 0 || diffToMax <= 0;
+              }).length;
+
+              return (
+                <div className={`bg-gray-800 flex flex-col ${isPipMode ? 'w-full min-h-screen' : 'rounded-2xl border border-gray-700 w-full max-w-lg shadow-2xl max-h-[85vh] animate-in zoom-in-95 duration-200'}`} onClick={e => !isPipMode && e.stopPropagation()}>
                   
-                  <div className="p-4 sm:p-5 border-b border-gray-700 flex items-center justify-between bg-gray-800/80 rounded-t-2xl shrink-0">
+                  {/* 頭部資訊與 PiP 按鈕 */}
+                  <div className="p-4 sm:p-5 border-b border-gray-700 flex items-center justify-between bg-gray-800/80 shrink-0 rounded-t-2xl">
                     <div className="flex items-center gap-4">
                       <div className={`flex shrink-0 w-12 h-12 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${spawnedCount > 0 ? 'border-yellow-500/40' : 'border-gray-700'}`}>
                         {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${spawnedCount > 0 ? 'text-yellow-400' : 'text-gray-500'}`} />}
@@ -1165,14 +1261,21 @@
                         </div>
                       </div>
                     </div>
-                    <button onClick={() => setActiveModalBossId(null)} className="p-2 bg-gray-900 hover:bg-gray-700 rounded-full transition-colors shrink-0">
-                      <X className="w-5 h-5 text-gray-400" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={(e) => { e.stopPropagation(); handleTogglePiP(); }} className={`p-2 rounded-full transition-colors shrink-0 ${isPipMode ? 'bg-blue-900/50 hover:bg-gray-700 border border-blue-500/50' : 'bg-gray-900 hover:bg-gray-700'}`} title={isPipMode ? "關閉子母畫面" : "以置頂子母畫面彈出"}>
+                        <PictureInPicture className={`w-5 h-5 ${isPipMode ? 'text-blue-400' : 'text-blue-400'}`} />
+                      </button>
+                      {!isPipMode && (
+                        <button onClick={() => setActiveModalBossId(null)} className="p-2 bg-gray-900 hover:bg-gray-700 rounded-full transition-colors shrink-0">
+                          <X className="w-5 h-5 text-gray-400" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="p-4 sm:p-5 overflow-y-auto flex flex-col gap-3">
-                    
-                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className="flex flex-col gap-2 bg-gray-900/60 p-2 sm:p-3 rounded-xl border border-gray-700/80 shrink-0">
+                  {/* 快速新增表單 */}
+                  <div className="px-4 py-3 sm:px-5 sm:py-4 bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 shrink-0 z-10 shadow-lg">
+                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className="flex flex-col gap-2 bg-gray-900/80 p-2 sm:p-3 rounded-xl border border-gray-700/80 shadow-inner">
                       <div className="flex flex-wrap gap-2">
                         <div className="flex flex-1 gap-2 min-w-[200px]">
                           <div className="w-[110px] sm:w-[130px] shrink-0 relative">
@@ -1196,7 +1299,9 @@
                         </div>
                       </div>
                     </form>
+                  </div>
 
+                  <div className="p-4 sm:p-5 overflow-y-auto flex flex-col gap-3 relative z-0 flex-1 pb-6">
                     <div className="flex flex-wrap items-center justify-between gap-3 shrink-0 mb-1">
                       <div className="flex flex-wrap items-center gap-4 bg-gray-900/40 p-2.5 rounded-xl border border-gray-700/50">
                         <div className="flex items-center gap-2 text-xs text-red-400 font-medium">
@@ -1440,7 +1545,38 @@
                     })()}
                   </div>
                 </div>
-              </div>
+              );
+            };
+
+            const activeGroup = displayBosses.find(g => g.id === activeModalBossId);
+
+            return (
+              <>
+                {/* 1. 若啟用子母畫面，且有選擇王，則透過 createPortal 渲染到獨立視窗 */}
+                {pipWindow && pipContainer && createPortal(
+                  <>
+                    {activeGroup ? (
+                      renderBossInnerContent(activeGroup, true)
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full flex-1 bg-gray-900 text-gray-500">
+                        <PictureInPicture className="w-12 h-12 mb-4 opacity-50" />
+                        <p className="font-medium">請在主網頁點選要追蹤的王</p>
+                        <p className="text-xs mt-2 opacity-70">畫面會自動在此同步顯示</p>
+                      </div>
+                    )}
+                    {/* 在子母畫面內部同時渲染一次所有提示彈窗，這樣在子母畫面點擊時就能直接看到 */}
+                    {renderOverlays(true)}
+                  </>,
+                  pipContainer
+                )}
+
+                {/* 2. 若未啟用子母畫面，則維持在主畫面渲染置中彈窗 */}
+                {!pipWindow && activeGroup && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-in fade-in" onClick={() => setActiveModalBossId(null)}>
+                    {renderBossInnerContent(activeGroup, false)}
+                  </div>
+                )}
+              </>
             );
           })()}
 
@@ -1796,10 +1932,9 @@
                         const isPinned = pinnedBosses.includes(group.id);
                         
                         const currentNow = Date.now();
-                        // 統計進入浮動(黃)或已重生(綠)的頻道總數
                         const spawnedChannels = group.channels.filter(ch => {
                           const diffToNext = ch.nextSpawn - currentNow;
-                          return diffToNext <= 0; // 只要最快重生時間過了，就算是準備重生或已重生
+                          return diffToNext <= 0; 
                         });
                         
                         const spawnedCount = spawnedChannels.length;
@@ -1896,6 +2031,7 @@
 
       return (
         <>
+          {/* 這個是在主畫面彈出的 Alert (維持原狀) */}
           {alertMsg && (
             <div className={`fixed top-4 right-4 z-[99] px-5 py-4 rounded-xl flex items-center gap-4 shadow-2xl animate-in slide-in-from-top-4 border ${
               alertMsg.type === 'success' ? 'bg-green-900/90 border-green-500 text-green-100' : 'bg-red-900/90 border-red-500 text-red-100'
@@ -1917,7 +2053,7 @@
           ) : appUser.status === 'pending' ? (
             <PendingScreen onLogout={handleLogout} />
           ) : (
-            <MainApp appUser={appUser} onLogout={handleLogout} showMessage={showMessage} />
+            <MainApp appUser={appUser} onLogout={handleLogout} showMessage={showMessage} alertMsg={alertMsg} setAlertMsg={setAlertMsg} />
           )}
         </>
       );
