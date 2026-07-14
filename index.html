@@ -429,6 +429,7 @@
         return () => clearInterval(timer);
       }, []);
 
+      // 修正休眠機制，加入 pipWindow 依賴並綁定事件
       useEffect(() => {
         let idleTimer;
         const resetIdleTimer = () => {
@@ -440,28 +441,48 @@
         };
 
         const handleVisibilityChange = () => {
-          if (document.visibilityState === 'visible') {
+          if (document.visibilityState === 'visible' || (pipWindow && pipWindow.document.visibilityState === 'visible')) {
             resetIdleTimer();
           }
         };
 
         resetIdleTimer();
 
+        // 綁定主視窗事件
         window.addEventListener('mousedown', resetIdleTimer);
         window.addEventListener('keydown', resetIdleTimer);
         window.addEventListener('touchstart', resetIdleTimer);
         window.addEventListener('scroll', resetIdleTimer, true);
         document.addEventListener('visibilitychange', handleVisibilityChange);
 
+        // 如果有開啟子母畫面，同時綁定事件在子母畫面視窗上
+        if (pipWindow) {
+          pipWindow.addEventListener('mousedown', resetIdleTimer);
+          pipWindow.addEventListener('keydown', resetIdleTimer);
+          pipWindow.addEventListener('touchstart', resetIdleTimer);
+          pipWindow.addEventListener('scroll', resetIdleTimer, true);
+          pipWindow.document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
+
         return () => {
           clearTimeout(idleTimer);
+          // 清除主視窗事件
           window.removeEventListener('mousedown', resetIdleTimer);
           window.removeEventListener('keydown', resetIdleTimer);
           window.removeEventListener('touchstart', resetIdleTimer);
           window.removeEventListener('scroll', resetIdleTimer, true);
           document.removeEventListener('visibilitychange', handleVisibilityChange);
+          
+          // 清除子母畫面事件
+          if (pipWindow) {
+            pipWindow.removeEventListener('mousedown', resetIdleTimer);
+            pipWindow.removeEventListener('keydown', resetIdleTimer);
+            pipWindow.removeEventListener('touchstart', resetIdleTimer);
+            pipWindow.removeEventListener('scroll', resetIdleTimer, true);
+            pipWindow.document.removeEventListener('visibilitychange', handleVisibilityChange);
+          }
         };
-      }, [isSleeping]);
+      }, [isSleeping, pipWindow]); // 加入 pipWindow 作為 dependency
 
       const activeBossesRef = useRef(activeBosses);
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
