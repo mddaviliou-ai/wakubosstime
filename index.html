@@ -62,7 +62,6 @@
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInAnonymously } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where } from 'firebase/firestore';
-    // 新增 PictureInPicture icon
     import { Clock, History, Activity, Trash2, ShieldAlert, Crosshair, Skull, UserCog, Users, MapPin, ChevronDown, ChevronUp, Search, Image as ImageIcon, Upload, Edit2, X, Flame, RefreshCw, CheckCircle, Server, LogOut, KeyRound, Save, Star, Eye, EyeOff, Power, Ban, Moon, Settings, PictureInPicture } from 'lucide-react';
 
     const firebaseConfig = {
@@ -382,6 +381,9 @@
       // === 子母畫面 (PiP) 狀態 ===
       const [pipWindow, setPipWindow] = useState(null);
       const [pipContainer, setPipContainer] = useState(null);
+      const [showPipBossSelector, setShowPipBossSelector] = useState(false);
+      const [pipSearchQuery, setPipSearchQuery] = useState('');
+      const [pipBossSort, setPipBossSort] = useState(() => localStorage.getItem('wakuboss_pip_sort') || 'earliest');
 
       const longPressTimer = useRef(null);
       const isLongPress = useRef(false);
@@ -413,6 +415,10 @@
       useEffect(() => {
         localStorage.setItem('wakuboss_sort', bossSort);
       }, [bossSort]);
+
+      useEffect(() => {
+        localStorage.setItem('wakuboss_pip_sort', pipBossSort);
+      }, [pipBossSort]);
 
       useEffect(() => {
         localStorage.setItem('wakuboss_form_collapsed', isReportFormCollapsed);
@@ -596,27 +602,22 @@
 
       // === 子母畫面 (PiP) 啟動功能 ===
       const handleTogglePiP = async () => {
-        // 檢查瀏覽器是否支援 Document Picture-in-Picture API
         if (!('documentPictureInPicture' in window)) {
           showMessage('您的瀏覽器不支援子母畫面 API。請使用桌面版 Chrome 或 Edge 瀏覽器 (v116+)。', 'error');
           return;
         }
 
-        // 若已經有開啟 PiP 視窗，則將其關閉
         if (pipWindow) {
-          pipWindow.close(); // 呼叫 close 會觸發 pagehide 事件來清理狀態
+          pipWindow.close(); 
           return;
         }
 
         try {
-          // 請求開啟新的 PiP 視窗
           const pipWin = await window.documentPictureInPicture.requestWindow({ width: 420, height: 600 });
           
-          // 複製主視窗的樣式表 (CSS) 到新視窗，確保 UI 外觀一致
           const styleTags = document.querySelectorAll('style, link[rel="stylesheet"]');
           styleTags.forEach(tag => pipWin.document.head.appendChild(tag.cloneNode(true)));
           
-          // 載入 Tailwind 以確保動態產生的 class 能正常渲染
           const script = document.createElement('script');
           script.src = "https://cdn.tailwindcss.com";
           pipWin.document.head.appendChild(script);
@@ -624,20 +625,23 @@
           // 建立我們要在 PiP 內掛載 React 元件的容器
           const container = document.createElement('div');
           container.id = 'pip-root';
-          // 設定容器的滿版基礎樣式，確保背景顏色與捲軸表現與主畫面一致
-          container.className = 'w-full h-full overflow-y-auto bg-gray-900 text-white flex flex-col';
+          // 設定容器的滿版基礎樣式，讓視窗負責隱藏溢出，內部列表自己捲動
+          container.className = 'w-full h-full overflow-hidden bg-gray-900 text-white flex flex-col relative';
+          pipWin.document.documentElement.style.height = '100%';
+          pipWin.document.body.style.height = '100%';
           pipWin.document.body.style.margin = '0';
           pipWin.document.body.style.backgroundColor = '#111827';
           pipWin.document.body.appendChild(container);
 
-          // 將建立好的視窗與容器存入 state，React 會透過 portal 自動將畫面渲染進去
           setPipContainer(container);
           setPipWindow(pipWin);
 
-          // 監聽 PiP 視窗關閉事件 (包含使用者手動點右上角 X 關閉)
+          // 監聽 PiP 視窗關閉事件
           pipWin.addEventListener('pagehide', () => {
             setPipWindow(null);
             setPipContainer(null);
+            setShowPipBossSelector(false);
+            setPipSearchQuery(''); // 關閉時清空搜尋
           });
         } catch (err) {
           console.error(err);
@@ -687,11 +691,14 @@
           return { ...template, channels, effectiveGlobalSpawn, effectiveGlobalMaxSpawn, earliestSpawn: earliest, earliestMaxSpawn: earliestMax, hasRecord };
         });
 
+        // 複製一份陣列，以便 PiP 選單能與主畫面獨立搜尋排序
+        let baseProcessed = [...processed];
+
         if (bossSort === 'hasRecordOnly') {
           processed = processed.filter(b => pinnedBosses.includes(b.id) || b.hasRecord);
         }
 
-        return processed.sort((a, b) => {
+        const sortedDisplay = processed.sort((a, b) => {
            const aPinned = pinnedBosses.includes(a.id);
            const bPinned = pinnedBosses.includes(b.id);
            
@@ -710,7 +717,44 @@
            
            return aCD - bCD;
         });
-      }, [bossTemplates, activeBosses, bossSort, pinnedBosses, uiTick]); 
+
+        // 獨立為 Pip Selector 處理搜尋與排序
+        let pipProcessed = baseProcessed;
+        
+        if (pipSearchQuery.trim()) {
+           pipProcessed = pipProcessed.filter(b => b.name.toLowerCase().includes(pipSearchQuery.toLowerCase()));
+        }
+
+        if (pipBossSort === 'hasRecordOnly') {
+           pipProcessed = pipProcessed.filter(b => pinnedBosses.includes(b.id) || b.hasRecord);
+        }
+
+        const sortedPipDisplay = pipProcessed.sort((a, b) => {
+           const aPinned = pinnedBosses.includes(a.id);
+           const bPinned = pinnedBosses.includes(b.id);
+           
+           if (aPinned && !bPinned) return -1;
+           if (!aPinned && bPinned) return 1;
+
+           if (pipBossSort === 'levelDesc') return (b.level || 0) - (a.level || 0) || a.name.localeCompare(b.name);
+           if (pipBossSort === 'levelAsc' || pipBossSort === 'hasRecordOnly') return (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name);
+           
+           // pipBossSort === 'earliest'
+           const aEarliest = a.earliestSpawn !== null ? a.earliestSpawn : Infinity;
+           const bEarliest = b.earliestSpawn !== null ? b.earliestSpawn : Infinity;
+           
+           if (aEarliest === bEarliest) {
+              const aCD = a.minCooldown || a.cooldownMinutes || Infinity;
+              const bCD = b.minCooldown || b.cooldownMinutes || Infinity;
+              if (aCD === bCD) return (a.level || 0) - (b.level || 0) || a.name.localeCompare(b.name);
+              return aCD - bCD;
+           }
+
+           return aEarliest - bEarliest;
+        });
+
+        return { main: sortedDisplay, pip: sortedPipDisplay };
+      }, [bossTemplates, activeBosses, bossSort, pinnedBosses, uiTick, pipSearchQuery, pipBossSort]); 
 
       const handleChangePassword = async (e) => {
         e.preventDefault();
@@ -1000,7 +1044,7 @@
             setIsReporting(true);
             await Promise.all(group.channels.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
             showMessage(`已成功清除 ${group.name} 的所有紀錄`, 'success');
-            if (!pipWindow) setActiveModalBossId(null); // 若不在 PiP 中，清除後關閉視窗
+            if (!pipWindow) setActiveModalBossId(null);
           } catch (error) {
             showMessage("清除失敗，請確認權限", "error");
           } finally {
@@ -1025,7 +1069,6 @@
             setIsReporting(true);
             await Promise.all(targets.map(ch => deleteDoc(doc(db, 'activeBosses', ch.id))));
             showMessage(`已成功清除 ${targets.length} 筆過期紀錄`, 'success');
-            // 如果全部清空了且不在 PiP，則關閉彈窗
             if (!pipWindow && targets.length === group.channels.length) {
                 setActiveModalBossId(null);
             }
@@ -1239,13 +1282,20 @@
               }).length;
 
               return (
-                <div className={`bg-gray-800 flex flex-col ${isPipMode ? 'w-full min-h-screen' : 'rounded-2xl border border-gray-700 w-full max-w-lg shadow-2xl max-h-[85vh] animate-in zoom-in-95 duration-200'}`} onClick={e => !isPipMode && e.stopPropagation()}>
+                <div className={`bg-gray-800 flex flex-col relative overflow-hidden ${isPipMode ? 'w-full h-full' : 'rounded-2xl border border-gray-700 w-full max-w-lg shadow-2xl max-h-[85vh] animate-in zoom-in-95 duration-200'}`} onClick={e => !isPipMode && e.stopPropagation()}>
                   
                   {/* 頭部資訊與 PiP 按鈕 */}
                   <div className="p-4 sm:p-5 border-b border-gray-700 flex items-center justify-between bg-gray-800/80 shrink-0 rounded-t-2xl">
                     <div className="flex items-center gap-4">
-                      <div className={`flex shrink-0 w-12 h-12 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${spawnedCount > 0 ? 'border-yellow-500/40' : 'border-gray-700'}`}>
-                        {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${spawnedCount > 0 ? 'text-yellow-400' : 'text-gray-500'}`} />}
+                      <div 
+                        onClick={() => setShowPipBossSelector(true)}
+                        className={`relative flex shrink-0 w-12 h-12 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden cursor-pointer hover:border-blue-500 transition-colors group ${spawnedCount > 0 ? 'border-yellow-500/40' : 'border-gray-700'}`}
+                        title="點擊切換其他 BOSS"
+                      >
+                        {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover transition-transform group-hover:scale-110" /> : <Skull className={`w-6 h-6 transition-transform group-hover:scale-110 ${spawnedCount > 0 ? 'text-yellow-400' : 'text-gray-500'}`} />}
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <RefreshCw className="w-5 h-5 text-white" />
+                        </div>
                       </div>
                       <div className="flex flex-col">
                         <div className="flex items-center flex-wrap gap-2">
@@ -1544,11 +1594,73 @@
                       );
                     })()}
                   </div>
+
+                  {/* 切換王選單 Overlay */}
+                  {showPipBossSelector && (
+                    <div className="absolute inset-0 z-[200] bg-gray-900 flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                      <div className="p-4 border-b border-gray-700 flex flex-col gap-3 bg-gray-800 shrink-0">
+                        <div className="flex justify-between items-center">
+                          <h3 className="font-bold text-white flex items-center gap-2"><RefreshCw className="w-4 h-4"/> 切換追蹤 BOSS</h3>
+                          <button onClick={(e) => { e.stopPropagation(); setShowPipBossSelector(false); setPipSearchQuery(''); }} className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors"><X className="w-5 h-5 text-gray-300"/></button>
+                        </div>
+                        
+                        {/* 獨立的搜尋與排序區塊 */}
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <Search className="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            <input 
+                               type="text" 
+                               value={pipSearchQuery} 
+                               onChange={(e) => setPipSearchQuery(e.target.value)} 
+                               placeholder="搜尋王..." 
+                               className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-8 pr-2 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500" 
+                            />
+                          </div>
+                          <select 
+                             value={pipBossSort} 
+                             onChange={e=>setPipBossSort(e.target.value)} 
+                             className="w-[110px] bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 shrink-0"
+                          >
+                            <option value="earliest">重生時間排序</option>
+                            <option value="levelAsc">等級低到高</option>
+                            <option value="levelDesc">等級高到低</option>
+                            <option value="hasRecordOnly">有紀錄Boss</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-3 space-y-2 pb-6">
+                        {displayBosses.pip.length === 0 ? (
+                           <div className="text-center py-6 text-gray-500 text-sm">找不到符合條件的王</div>
+                        ) : (
+                           displayBosses.pip.map(b => {
+                             const bSpawnedCount = b.channels.filter(ch => (ch.nextSpawn - Date.now()) <= 0).length;
+                             return (
+                               <div key={b.id} onClick={(e) => { e.stopPropagation(); setActiveModalBossId(b.id); setShowPipBossSelector(false); setPipSearchQuery(''); }} className={`flex items-center justify-between p-3 rounded-xl border transition-colors cursor-pointer ${b.id === group.id ? 'bg-blue-900/30 border-blue-500/50' : 'bg-gray-800 border-gray-700 hover:border-gray-500'}`}>
+                                  <div className="flex items-center gap-3">
+                                     <div className={`w-10 h-10 rounded-lg overflow-hidden bg-gray-900 border flex items-center justify-center shrink-0 ${bSpawnedCount > 0 ? 'border-yellow-500/50' : 'border-gray-600'}`}>
+                                        {b.imageUrl ? <img src={b.imageUrl} className="w-full h-full object-cover" /> : <Skull className="w-5 h-5 text-gray-500"/>}
+                                     </div>
+                                     <div className="flex flex-col">
+                                        <span className="font-bold text-gray-200 text-sm">{b.name} {b.level && <span className="text-yellow-400 text-xs ml-1">Lv.{b.level}</span>}</span>
+                                        <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                                           最快重生: <CountdownTimer nextSpawnTime={b.earliestSpawn} maxSpawnTime={b.earliestMaxSpawn} />
+                                        </div>
+                                     </div>
+                                  </div>
+                                  {b.id === group.id && <CheckCircle className="w-5 h-5 text-blue-400" />}
+                               </div>
+                             );
+                           })
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               );
             };
 
-            const activeGroup = displayBosses.find(g => g.id === activeModalBossId);
+            const activeGroup = displayBosses.main.find(g => g.id === activeModalBossId);
 
             return (
               <>
@@ -1921,20 +2033,21 @@
                     </select>
                   </div>
 
-                  {displayBosses.length === 0 ? (
+                  {displayBosses.main.length === 0 ? (
                     <div className="text-center py-16 bg-gray-800 rounded-2xl border border-gray-700 border-dashed">
                       <Skull className="w-12 h-12 text-gray-600 mx-auto mb-3" />
                       <p className="text-gray-400">目前沒有符合條件的重生資訊。</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {displayBosses.map(group => {
+                      {displayBosses.main.map(group => {
                         const isPinned = pinnedBosses.includes(group.id);
                         
                         const currentNow = Date.now();
+                        // 統計進入浮動(黃)或已重生(綠)的頻道總數
                         const spawnedChannels = group.channels.filter(ch => {
                           const diffToNext = ch.nextSpawn - currentNow;
-                          return diffToNext <= 0; 
+                          return diffToNext <= 0; // 只要最快重生時間過了，就算是準備重生或已重生
                         });
                         
                         const spawnedCount = spawnedChannels.length;
@@ -2031,7 +2144,6 @@
 
       return (
         <>
-          {/* 這個是在主畫面彈出的 Alert (維持原狀) */}
           {alertMsg && (
             <div className={`fixed top-4 right-4 z-[99] px-5 py-4 rounded-xl flex items-center gap-4 shadow-2xl animate-in slide-in-from-top-4 border ${
               alertMsg.type === 'success' ? 'bg-green-900/90 border-green-500 text-green-100' : 'bg-red-900/90 border-red-500 text-red-100'
