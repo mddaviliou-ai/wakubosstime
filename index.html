@@ -342,14 +342,12 @@
       const [allUsers, setAllUsers] = useState([]); 
       
       const [isSleeping, setIsSleeping] = useState(false);
-      const [uiTick, setUiTick] = useState(0);
       const [sysSettings, setSysSettings] = useState({ autoClearEnabled: false, autoClearHours: 4, autoClearInterval: 1 });
 
       const [activeModalBossId, setActiveModalBossId] = useState(() => localStorage.getItem('wakuboss_active_modal') || null); 
       // 供 PiP 使用的雙王陣列
       const [pipBossIds, setPipBossIds] = useState([]);
 
-      const [modalPage, setModalPage] = useState(1); 
       const [adminTab, setAdminTab] = useState('home'); 
       const [showPwdModal, setShowPwdModal] = useState(false);
       const [newPwd, setNewPwd] = useState('');
@@ -359,7 +357,6 @@
       const [rekillModalData, setRekillModalData] = useState(null);
       const [rekillMemo, setRekillMemo] = useState('');
 
-      const [expandedMemoId, setExpandedMemoId] = useState(null); 
       const [isReportFormCollapsed, setIsReportFormCollapsed] = useState(() => localStorage.getItem('wakuboss_form_collapsed') === 'true');
       
       const [searchQuery, setSearchQuery] = useState('');
@@ -369,10 +366,13 @@
       const [killTimeInput, setKillTimeInput] = useState('');
       const [killDateSelect, setKillDateSelect] = useState('today');
 
-      const [modalChannelInput, setModalChannelInput] = useState('');
-      const [modalMemoInput, setModalMemoInput] = useState('');
-      const [modalKillTimeInput, setModalKillTimeInput] = useState('');
-      const [modalKillDateSelect, setModalKillDateSelect] = useState('today');
+      // 將原本單一的輸入狀態改為字典（Dictionary）物件，鍵值為 Boss ID，讓子母畫面各王獨立擁有輸入狀態
+      const [modalChannelInput, setModalChannelInput] = useState({});
+      const [modalMemoInput, setModalMemoInput] = useState({});
+      const [modalKillTimeInput, setModalKillTimeInput] = useState({});
+      const [modalKillDateSelect, setModalKillDateSelect] = useState({});
+      const [modalPage, setModalPage] = useState({});
+      const [expandedMemoId, setExpandedMemoId] = useState({});
 
       const [pinnedBosses, setPinnedBosses] = useState(() => {
         const saved = localStorage.getItem(`wakuboss_pinned_${appUser.id}`);
@@ -437,11 +437,6 @@
       }, [isReportFormCollapsed]);
 
       useEffect(() => {
-        const timer = setInterval(() => setUiTick(t => t + 1), 1000);
-        return () => clearInterval(timer);
-      }, []);
-
-      useEffect(() => {
         const resetIdleTimer = () => {
           if (isSleeping) return; 
           if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
@@ -493,6 +488,7 @@
       const activeBossesRef = useRef(activeBosses);
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
 
+      // ⚠️ 修復 BUG 1: 恢復為所有玩家皆可觸發背景清理，只要未關閉功能且非休眠即可
       useEffect(() => {
         if (!sysSettings.autoClearEnabled || isSleeping) return;
         
@@ -558,14 +554,10 @@
         showMessage(`已記錄巡邏時間為 ${timeStr} (不耗讀取)`, 'success');
       };
 
+      // 確保每次關閉 Modal 時也關閉選擇器，且不再錯誤地重置字典為字串
       useEffect(() => {
         if (!activeModalBossId) {
-          setModalChannelInput('');
-          setModalMemoInput('');
-          setModalKillTimeInput('');
-          setModalKillDateSelect('today');
-          setModalPage(1);
-          setExpandedMemoId(null);
+          setShowBossSelector(false); 
         }
       }, [activeModalBossId]);
 
@@ -688,6 +680,7 @@
         }
       }, [filteredTemplates, selectedTemplateId]);
 
+      // ⚠️ 修復 BUG 3：移除無意義的 uiTick 依賴，大幅降低手機/電腦的效能運算負擔
       const displayBosses = useMemo(() => {
         let processed = bossTemplates.map(template => {
           const channels = activeBosses.filter(b => b.templateId === template.id);
@@ -720,6 +713,7 @@
           return { ...template, channels, effectiveGlobalSpawn, effectiveGlobalMaxSpawn, earliestSpawn: earliest, earliestMaxSpawn: earliestMax, hasRecord };
         });
 
+        // 保存一份完全沒有被 "有紀錄Boss" 條件過濾掉的完整陣列，解決點擊王但找不到資料的問題
         let baseProcessed = [...processed];
 
         if (bossSort === 'hasRecordOnly') {
@@ -779,8 +773,9 @@
            return aEarliest - bEarliest;
         });
 
-        return { main: sortedDisplay, pip: sortedPipDisplay };
-      }, [bossTemplates, activeBosses, bossSort, pinnedBosses, uiTick, pipSearchQuery, pipBossSort]); 
+        // 輸出 main (主畫面受過濾影響), pip (選擇器受獨立過濾影響), all (完全無過濾，用於直接拿取 ID 渲染)
+        return { main: sortedDisplay, pip: sortedPipDisplay, all: baseProcessed };
+      }, [bossTemplates, activeBosses, bossSort, pinnedBosses, pipSearchQuery, pipBossSort]); 
 
       const handleChangePassword = async (e) => {
         e.preventDefault();
@@ -1048,13 +1043,17 @@
       };
 
       const handleModalQuickAdd = async (template) => {
-        if (!modalChannelInput.trim()) return;
+        const channel = modalChannelInput[template.id] || '';
+        if (!channel.trim()) return;
         try {
           setIsReporting(true);
-          const activeBossId = `${template.id}_${modalChannelInput.trim()}`.replace(/[^a-zA-Z0-9_]/g, '_');
-          const killTime = parseKillTime(modalKillTimeInput, modalKillDateSelect);
+          const activeBossId = `${template.id}_${channel.trim()}`.replace(/[^a-zA-Z0-9_]/g, '_');
+          const timeVal = modalKillTimeInput[template.id] || '';
+          const dateVal = modalKillDateSelect[template.id] || 'today';
+          const killTime = parseKillTime(timeVal, dateVal);
           const minCD = template.minCooldown || template.cooldownMinutes || 60;
           const maxCD = template.maxCooldown || template.cooldownMinutes || 60;
+          const memoVal = modalMemoInput[template.id] || '';
           
           setLocalPatrols(prev => {
             const next = { ...prev };
@@ -1066,8 +1065,8 @@
           await setDoc(doc(db, 'activeBosses', activeBossId), {
             templateId: template.id, 
             bossName: template.name, 
-            channel: modalChannelInput.trim(), 
-            memo: modalMemoInput.trim(),
+            channel: channel.trim(), 
+            memo: memoVal.trim(),
             cooldownMinutes: minCD, 
             maxCooldown: maxCD, 
             lastKilled: killTime, 
@@ -1078,10 +1077,13 @@
             patrolHistory: [],
             isRekilled: false
           });
-          setModalChannelInput('');
-          setModalMemoInput('');
-          setModalKillTimeInput('');
-          showMessage(`已成功回報 ${template.name} (${modalChannelInput.trim()}頻)`, "success");
+
+          // 新增成功後清除該王的輸入紀錄
+          setModalChannelInput(prev => ({...prev, [template.id]: ''}));
+          setModalMemoInput(prev => ({...prev, [template.id]: ''}));
+          setModalKillTimeInput(prev => ({...prev, [template.id]: ''}));
+
+          showMessage(`已成功回報 ${template.name} (${channel.trim()}頻)`, "success");
         } catch (error) { showMessage("錯誤: 通報失敗，請確認權限", "error"); } finally { setIsReporting(false); }
       };
 
@@ -1429,8 +1431,16 @@
                 return diffToNext <= 0 || diffToMax <= 0;
               }).length;
 
+              // 取出專屬於這隻王 (group.id) 的獨立輸入狀態，如果沒有則預設為初始值
+              const currentChannel = modalChannelInput[group.id] || '';
+              const currentMemo = modalMemoInput[group.id] || '';
+              const currentKillDate = modalKillDateSelect[group.id] || 'today';
+              const currentKillTime = modalKillTimeInput[group.id] || '';
+              const currentPage = modalPage[group.id] || 1;
+              const currentExpanded = expandedMemoId[group.id] || null;
+
               return (
-                <div className={`bg-gray-800 flex flex-col relative overflow-hidden h-full w-full ${!isPipMode ? 'rounded-2xl border border-gray-700 max-w-lg shadow-2xl max-h-[85vh] animate-in zoom-in-95 duration-200' : ''}`} onClick={e => !isPipMode && e.stopPropagation()}>
+                <div className={`bg-gray-800 flex flex-col relative overflow-hidden h-full w-full ${!isPipMode ? 'rounded-2xl border border-gray-700 max-w-lg shadow-2xl max-h-[85vh] animate-in zoom-in-95 duration-200' : 'min-h-0'}`} onClick={e => !isPipMode && e.stopPropagation()}>
                   
                   {/* 把選單渲染在這裡，主畫面適用 (PiP 在另外的地方渲染) */}
                   {(!isPipMode || pipIndex === 0) && !isPipMode && renderBossSelectorModal()}
@@ -1493,20 +1503,20 @@
                         <div className="flex flex-1 gap-2 min-w-[200px]">
                           <div className="w-[110px] sm:w-[130px] shrink-0 relative">
                             <MapPin className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                            <input type="number" min="1" value={modalChannelInput} onChange={e => setModalChannelInput(e.target.value)} placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-8 pr-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center" required />
+                            <input type="number" min="1" value={currentChannel} onChange={e => setModalChannelInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-8 pr-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center" required />
                           </div>
                           <div className="flex-1">
-                            <input type="text" value={modalMemoInput} onChange={e => setModalMemoInput(e.target.value)} placeholder="備註 (選填, 例: 掉寶)" className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+                            <input type="text" value={currentMemo} onChange={e => setModalMemoInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder="備註 (選填, 例: 掉寶)" className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
                           </div>
                         </div>
 
                         <div className="flex w-full sm:w-auto items-center gap-1.5 shrink-0 justify-end">
-                          <select value={modalKillDateSelect} onChange={e=>setModalKillDateSelect(e.target.value)} className="w-[65px] bg-gray-800 border border-gray-600 rounded-lg px-1 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center">
+                          <select value={currentKillDate} onChange={e=>setModalKillDateSelect(prev => ({...prev, [group.id]: e.target.value}))} className="w-[65px] bg-gray-800 border border-gray-600 rounded-lg px-1 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center">
                             <option value="today">今天</option>
                             <option value="yesterday">昨天</option>
                           </select>
-                          <input type="time" step="1" value={modalKillTimeInput} onChange={e => setModalKillTimeInput(e.target.value)} className="w-[105px] bg-gray-800 border border-gray-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]" title="擊殺時間 (空白為現在)" />
-                          <button type="submit" disabled={isReporting || !modalChannelInput.trim()} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 h-[38px] min-w-[70px]">
+                          <input type="time" step="1" value={currentKillTime} onChange={e => setModalKillTimeInput(prev => ({...prev, [group.id]: e.target.value}))} className="w-[105px] bg-gray-800 border border-gray-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]" title="擊殺時間 (空白為現在)" />
+                          <button type="submit" disabled={isReporting || !currentChannel.trim()} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 h-[38px] min-w-[70px]">
                             登記
                           </button>
                         </div>
@@ -1514,7 +1524,7 @@
                     </form>
                   </div>
 
-                  <div className={`${isPipMode ? 'p-2 pb-2' : 'p-4 sm:p-5 pb-6'} overflow-y-auto flex flex-col gap-3 relative z-0 flex-1`}>
+                  <div className={`${isPipMode ? 'p-2 pb-2' : 'p-4 sm:p-5 pb-6'} overflow-y-auto flex flex-col gap-3 relative z-0 flex-1 min-h-0`}>
                     <div className="flex flex-wrap items-center justify-between gap-3 shrink-0 mb-1">
                       {/* 子母畫面中隱藏顏色圖例介紹，以節省空間 */}
                       {!isPipMode && (
@@ -1600,7 +1610,7 @@
                       const sortedChannels = [...group.channels].sort((a, b) => a.nextSpawn - b.nextSpawn);
                       const itemsPerPage = 10;
                       const totalPages = Math.max(1, Math.ceil(sortedChannels.length / itemsPerPage));
-                      const safePage = Math.min(modalPage, totalPages);
+                      const safePage = Math.min(currentPage, totalPages);
                       const paginatedChannels = sortedChannels.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
 
                       return (
@@ -1614,7 +1624,7 @@
                             
                             const isRekilled = active.isRekilled === true; 
                             const canDelete = isAdmin || active.reportedBy === appUser.id;
-                            const isExpanded = expandedMemoId === active.id;
+                            const isExpanded = currentExpanded === active.id;
                             
                             const showActionButtons = (isFloating || isSpawned);
 
@@ -1627,7 +1637,9 @@
                                     <div 
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        if (active.memo) setExpandedMemoId(isExpanded ? null : active.id);
+                                        if (active.memo) {
+                                            setExpandedMemoId(prev => ({...prev, [group.id]: prev[group.id] === active.id ? null : active.id}));
+                                        }
                                       }}
                                       className={`relative flex items-center justify-center border rounded px-2 sm:px-3 py-0.5 sm:py-1 min-w-[3rem] sm:min-w-[4rem] shrink-0 transition-colors ${active.memo ? 'cursor-pointer hover:brightness-125' : ''} ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : isRekilled ? 'bg-purple-900/50 border-purple-500/50' : 'bg-gray-900 border-gray-600'}`}
                                       title={active.memo ? "點擊顯示備註" : ""}
@@ -1751,13 +1763,13 @@
                           {totalPages > 1 && (
                             <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-700/50 shrink-0 gap-1 sm:gap-2">
                               <div className="flex gap-1">
-                                <button onClick={() => setModalPage(1)} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">首頁</button>
-                                <button onClick={() => setModalPage(p => Math.max(1, p - 1))} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">上一頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: 1}))} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">首頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: Math.max(1, (prev[group.id] || 1) - 1)}))} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">上一頁</button>
                               </div>
                               <span className="text-gray-400 text-xs font-medium whitespace-nowrap">第 {safePage} / {totalPages} 頁</span>
                               <div className="flex gap-1">
-                                <button onClick={() => setModalPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">下一頁</button>
-                                <button onClick={() => setModalPage(totalPages)} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">末頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: Math.min(totalPages, (prev[group.id] || 1) + 1)}))} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">下一頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: totalPages}))} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">末頁</button>
                               </div>
                             </div>
                           )}
@@ -1769,7 +1781,8 @@
               );
             };
 
-            const activeGroup = displayBosses.main.find(g => g.id === activeModalBossId);
+            // 改為向 displayBosses.all (完全不受限於主畫面的過濾器) 拿取王資料
+            const activeGroup = displayBosses.all.find(g => g.id === activeModalBossId);
 
             return (
               <>
@@ -1782,23 +1795,27 @@
                           切換/新增
                        </button>
                     </div>
-
-                    {pipBossIds.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-full flex-1 text-gray-500 p-4">
-                        <PictureInPicture className="w-12 h-12 mb-4 opacity-50" />
-                        <p className="font-medium text-center text-sm">請在主網頁點選要追蹤的王<br/>(或點擊右上角新增)</p>
-                      </div>
-                    ) : (
-                      pipBossIds.map((id, index) => {
-                         const group = displayBosses.main.find(g => g.id === id);
-                         if (!group) return null;
-                         return (
-                            <div key={id} className={`flex flex-col overflow-hidden ${pipBossIds.length === 2 ? 'h-1/2 border-b border-gray-700' : 'h-full'}`}>
-                               {renderBossInnerContent(group, true, index)}
-                            </div>
-                         );
-                      })
-                    )}
+                    
+                    {/* 還原為 50/50 比例，移除全域 scroll，利用 min-h-0 強制限制子元素捲動不推擠 */}
+                    <div className="flex-1 flex flex-col overflow-hidden">
+                      {pipBossIds.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full flex-1 text-gray-500 p-4">
+                          <PictureInPicture className="w-12 h-12 mb-4 opacity-50" />
+                          <p className="font-medium text-center text-sm">請在主網頁點選要追蹤的王<br/>(或點擊右上角新增)</p>
+                        </div>
+                      ) : (
+                        pipBossIds.map((id, index) => {
+                           // 改為向 displayBosses.all 拿取，防止在主頁過濾時消失
+                           const group = displayBosses.all.find(g => g.id === id);
+                           if (!group) return null;
+                           return (
+                              <div key={id} className={`flex flex-col min-h-0 overflow-hidden ${pipBossIds.length === 2 ? 'h-1/2 border-b border-gray-700' : 'h-full'}`}>
+                                 {renderBossInnerContent(group, true, index)}
+                              </div>
+                           );
+                        })
+                      )}
+                    </div>
                     
                     {/* 子母畫面的多選清單，放置於最上層 */}
                     {selectorMode === 'pip' && renderBossSelectorModal()}
@@ -1822,9 +1839,8 @@
             
             <header className="flex flex-col md:flex-row md:items-center justify-between bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700 gap-4">
               <div className="flex items-center gap-4">
-                <div className="relative w-14 h-14 bg-gray-900 rounded-xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg shrink-0">
-                  <span className="text-3xl absolute">⏱️</span>
-                  <img src="https://wakubosstime.vercel.app/logo2.png" alt="Logo" className="w-full h-full object-cover relative z-10" onError={(e) => e.target.style.display='none'} />
+                <div className="w-14 h-14 bg-gray-900 rounded-xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg shrink-0">
+                  <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時</h1>
@@ -1983,7 +1999,7 @@
                     <div className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
                        <h3 className="text-lg font-bold text-green-400 mb-2 flex items-center gap-2"><Trash2 className="w-5 h-5"/> 自動清除過期紀錄</h3>
                        <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                         開啟此功能後，只要有任何一位<span className="text-white">管理員的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
+                         開啟此功能後，只要有任何一位<span className="text-white">玩家的網頁保持開啟 (且未休眠)</span>，系統就會自動在背景檢查，並刪除已經「確定重生」超過指定時間的分流紀錄。<br/>
                          <span className="text-yellow-400 text-xs">注意：背景檢查是用網頁上的記憶體計算，消耗 0 次讀取量。此設定為全域同步。</span>
                        </p>
                        <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-gray-800 p-4 rounded-lg border border-gray-700">
