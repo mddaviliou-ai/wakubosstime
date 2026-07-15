@@ -1516,36 +1516,51 @@
                     </div>
                   </div>
 
-                  {/* 快速新增表單 (針對 PiP 與主畫面分開排版) */}
-                  <div className={`${isPipMode ? 'px-3 py-2' : 'px-4 py-3 sm:px-5 sm:py-4'} bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 shrink-0 z-10 shadow-lg`}>
-                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className={`flex flex-col bg-gray-900/80 rounded-xl border border-gray-700/80 shadow-inner ${isPipMode ? 'gap-2 p-2' : 'gap-2 p-2 sm:p-3'}`}>
-                      {/* 上排：分流 與 備註 */}
-                      <div className={`flex w-full ${isPipMode ? 'gap-2' : 'gap-2'}`}>
-                        <div className={`shrink-0 relative ${isPipMode ? 'w-[80px]' : 'w-[110px] sm:w-[130px]'}`}>
-                          <MapPin className={`text-gray-500 absolute top-1/2 -translate-y-1/2 ${isPipMode ? 'w-3.5 h-3.5 left-2' : 'w-4 h-4 left-2.5'}`} />
-                          <input type="number" min="1" value={currentChannel} 
-                                 onChange={e => {
-                                   const val = e.target.value;
-                                   if (val.length <= 4) setModalChannelInput(prev => ({...prev, [group.id]: val}));
-                                 }} 
-                                 placeholder="分流" className={`w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center ${isPipMode ? 'pl-6 pr-1 py-1.5 text-xs' : 'pl-8 pr-2 py-2 text-sm'}`} required />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <input type="text" value={currentMemo} onChange={e => setModalMemoInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder={isPipMode ? "備註(選填)" : "備註 (選填, 例: 掉寶)"} className={`w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isPipMode ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'}`} />
-                        </div>
-                      </div>
+                 {/* 快速新增表單 (針對 PiP 極致壓縮高度) */}
+                  <div className={`${isPipMode ? 'px-2 py-1.5' : 'px-4 py-3 sm:px-5 sm:py-4'} bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 shrink-0 z-10 shadow-lg`}>
+                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className={`flex bg-gray-900/80 rounded-xl border border-gray-700/80 shadow-inner ${isPipMode ? 'flex-row items-center gap-1.5 p-1.5' : 'flex-col gap-2 p-2 sm:p-3'}`}>
+                      {isPipMode ? (
+                        <>
+                          {/* 子母畫面：單排極簡模式 (修改下方的 width: '60px' 即可自訂分流格子的寬度，不會再亂跳了) */}
+                          <div className="shrink-0" style={{ width: '70px' }}>
+                            <input type="number" min="1" value={currentChannel} 
+                                   onChange={e => { const val = e.target.value; if (val.length <= 4) setModalChannelInput(prev => ({...prev, [group.id]: val})); }} 
+                                   placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center px-1 py-1 text-xs font-bold" required />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <input type="text" value={currentMemo} onChange={e => setModalMemoInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder="備註(選填)" className="w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 px-2 py-1 text-xs" />
+                          </div>
+                          <button type="submit" disabled={isReporting || !currentChannel.trim()} className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors disabled:opacity-50 px-3 py-1 text-xs h-[26px]">
+                            登記
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {/* 主畫面：保留所有選項的雙排模式 */}
+                          <div className="flex w-full gap-2">
+                            <div className="shrink-0 relative w-[110px] sm:w-[130px]">
+                              <MapPin className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                              <input type="number" min="1" value={currentChannel} 
+                                     onChange={e => { const val = e.target.value; if (val.length <= 4) setModalChannelInput(prev => ({...prev, [group.id]: val})); }} 
+                                     placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center pl-8 pr-2 py-2 text-sm font-bold" required />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <input type="text" value={currentMemo} onChange={e => setModalMemoInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder="備註 (選填, 例: 掉寶)" className="w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 px-3 py-2 text-sm" />
+                            </div>
+                          </div>
 
-                      {/* 下排：日期、時間、登記按鈕 */}
-                      <div className={`flex w-full items-center justify-end ${isPipMode ? 'gap-1.5' : 'gap-1.5'}`}>
-                        <select value={currentKillDate} onChange={e=>setModalKillDateSelect(prev => ({...prev, [group.id]: e.target.value}))} className={`bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center ${isPipMode ? 'w-[55px] px-1 py-1.5 text-xs' : 'w-[65px] px-1 py-2 text-sm'}`}>
-                          <option value="today">今天</option>
-                          <option value="yesterday">昨天</option>
-                        </select>
-                        <input type="time" step="1" value={currentKillTime} onChange={e => setModalKillTimeInput(prev => ({...prev, [group.id]: e.target.value}))} className={`bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 [color-scheme:dark] ${isPipMode ? 'w-[85px] px-1 py-1.5 text-xs' : 'w-[105px] px-2 py-2 text-sm'}`} title="擊殺時間 (空白為現在)" />
-                        <button type="submit" disabled={isReporting || !currentChannel.trim()} className={`bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors disabled:opacity-50 ${isPipMode ? 'px-3 py-1.5 text-xs h-[28px] min-w-[50px]' : 'px-4 py-2 text-sm h-[38px] min-w-[70px]'}`}>
-                          登記
-                        </button>
-                      </div>
+                          <div className="flex w-full items-center justify-end gap-1.5">
+                            <select value={currentKillDate} onChange={e=>setModalKillDateSelect(prev => ({...prev, [group.id]: e.target.value}))} className="bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center w-[65px] px-1 py-2 text-sm">
+                              <option value="today">今天</option>
+                              <option value="yesterday">昨天</option>
+                            </select>
+                            <input type="time" step="1" value={currentKillTime} onChange={e => setModalKillTimeInput(prev => ({...prev, [group.id]: e.target.value}))} className="bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 [color-scheme:dark] w-[105px] px-2 py-2 text-sm" title="擊殺時間 (空白為現在)" />
+                            <button type="submit" disabled={isReporting || !currentChannel.trim()} className="bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors disabled:opacity-50 px-4 py-2 text-sm h-[38px] min-w-[70px]">
+                              登記
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </form>
                   </div>
 
