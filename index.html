@@ -10,8 +10,8 @@
   <meta property="og:title" content="Waku野王重生計時">
   <meta property="og:description" content="Waku即時的野王重生倒數追蹤工具。">
   <meta property="og:image" content="https://wakubosstime.vercel.app/logo2.png">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⏱️</text></svg>" type="image/png">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⏱️</text></svg>">
+  <link rel="icon" href="./logo2.png" type="image/png">
+  <link rel="apple-touch-icon" href="./logo2.png">
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -31,6 +31,16 @@
       input, select, textarea {
         font-size: 16px !important;
       }
+    }
+
+    /* 隱藏數字輸入框的上下箭頭 */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield; /* Firefox */
     }
   </style>
 
@@ -343,6 +353,7 @@
       
       const [isSleeping, setIsSleeping] = useState(false);
       const [sysSettings, setSysSettings] = useState({ autoClearEnabled: false, autoClearHours: 4, autoClearInterval: 1 });
+      const [currentTime, setCurrentTime] = useState(Date.now());
 
       const [activeModalBossId, setActiveModalBossId] = useState(() => localStorage.getItem('wakuboss_active_modal') || null); 
       // 供 PiP 使用的雙王陣列
@@ -419,6 +430,13 @@
 
       const idleTimerRef = useRef(null);
 
+      // 全局計時器，用於每秒更新UI狀態顏色
+      useEffect(() => {
+        if (isSleeping) return;
+        const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
+        return () => clearInterval(timer);
+      }, [isSleeping]);
+
       useEffect(() => {
         if (activeModalBossId) localStorage.setItem('wakuboss_active_modal', activeModalBossId);
         else localStorage.removeItem('wakuboss_active_modal');
@@ -488,7 +506,7 @@
       const activeBossesRef = useRef(activeBosses);
       useEffect(() => { activeBossesRef.current = activeBosses; }, [activeBosses]);
 
-      // ⚠️ 修復 BUG 1: 恢復為所有玩家皆可觸發背景清理，只要未關閉功能且非休眠即可
+      // 背景清理
       useEffect(() => {
         if (!sysSettings.autoClearEnabled || isSleeping) return;
         
@@ -554,7 +572,7 @@
         showMessage(`已記錄巡邏時間為 ${timeStr} (不耗讀取)`, 'success');
       };
 
-      // 確保每次關閉 Modal 時也關閉選擇器，且不再錯誤地重置字典為字串
+      // 確保每次關閉 Modal 時也關閉選擇器
       useEffect(() => {
         if (!activeModalBossId) {
           setShowBossSelector(false); 
@@ -642,10 +660,13 @@
 
           const container = document.createElement('div');
           container.id = 'pip-root';
+          // 加入 overflow-hidden 確保外框不捲動
           container.className = 'w-full h-full overflow-hidden bg-gray-900 text-white flex flex-col relative';
           pipWin.document.documentElement.style.height = '100%';
+          pipWin.document.documentElement.style.overflow = 'hidden';
           pipWin.document.body.style.height = '100%';
           pipWin.document.body.style.margin = '0';
+          pipWin.document.body.style.overflow = 'hidden'; // 防止 body 產生捲動條
           pipWin.document.body.style.backgroundColor = '#111827';
           pipWin.document.body.appendChild(container);
 
@@ -680,7 +701,6 @@
         }
       }, [filteredTemplates, selectedTemplateId]);
 
-      // ⚠️ 修復 BUG 3：移除無意義的 uiTick 依賴，大幅降低手機/電腦的效能運算負擔
       const displayBosses = useMemo(() => {
         let processed = bossTemplates.map(template => {
           const channels = activeBosses.filter(b => b.templateId === template.id);
@@ -959,7 +979,7 @@
                  <div className="text-center py-6 text-gray-500 text-sm">找不到符合條件的王</div>
               ) : (
                  displayBosses.pip.map(b => {
-                   const bSpawnedCount = b.channels.filter(ch => (ch.nextSpawn - Date.now()) <= 0).length;
+                   const bSpawnedCount = b.channels.filter(ch => (ch.nextSpawn - currentTime) <= 0).length;
                    // 判斷是否選中：PiP模式看陣列，主畫面看 activeModalBossId
                    const isSelected = isPipMode ? pipBossIds.includes(b.id) : activeModalBossId === b.id;
 
@@ -1424,7 +1444,7 @@
           {/* === 單王詳細資訊渲染邏輯 (供主視窗與子母畫面共用) === */}
           {(() => {
             const renderBossInnerContent = (group, isPipMode, pipIndex = 0) => {
-              const currentNow = Date.now();
+              const currentNow = currentTime;
               const spawnedCount = group.channels.filter(ch => {
                 const diffToNext = ch.nextSpawn - currentNow;
                 const diffToMax = (ch.maxSpawn || ch.nextSpawn) - currentNow;
@@ -1440,21 +1460,21 @@
               const currentExpanded = expandedMemoId[group.id] || null;
 
               return (
-                <div className={`bg-gray-800 flex flex-col relative overflow-hidden h-full w-full ${!isPipMode ? 'rounded-2xl border border-gray-700 max-w-lg shadow-2xl max-h-[85vh] animate-in zoom-in-95 duration-200' : 'min-h-0'}`} onClick={e => !isPipMode && e.stopPropagation()}>
+                <div className={`bg-gray-800 flex flex-col relative overflow-hidden h-full w-full min-h-0 ${!isPipMode ? 'rounded-2xl border border-gray-700 max-w-lg shadow-2xl max-h-[85vh] animate-in zoom-in-95 duration-200' : ''}`} onClick={e => !isPipMode && e.stopPropagation()}>
                   
                   {/* 把選單渲染在這裡，主畫面適用 (PiP 在另外的地方渲染) */}
                   {(!isPipMode || pipIndex === 0) && !isPipMode && renderBossSelectorModal()}
 
-                  {/* 頭部資訊與 PiP 按鈕 */}
-                  <div className={`${isPipMode ? 'p-2 sm:p-3' : 'p-4 sm:p-5'} border-b border-gray-700 flex items-center justify-between bg-gray-800/80 shrink-0`}>
-                    <div className="flex items-center gap-4">
+                  {/* 頭部資訊與 PiP 按鈕 (針對 PiP 極致壓縮高度) */}
+                  <div className={`${isPipMode ? 'px-2 py-1.5' : 'p-4 sm:p-5'} border-b border-gray-700 flex items-center justify-between bg-gray-800/80 shrink-0`}>
+                    <div className={`flex items-center ${isPipMode ? 'gap-3' : 'gap-4'}`}>
                       <div 
                         onClick={(e) => { 
                           e.stopPropagation(); 
                           setSelectorMode(isPipMode ? 'pip' : 'main');
                           setShowBossSelector(true); 
                         }}
-                        className={`relative flex shrink-0 w-12 h-12 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden transition-colors cursor-pointer group hover:border-blue-500 ${spawnedCount > 0 ? 'border-yellow-500/40' : 'border-gray-700'}`}
+                        className={`relative flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden transition-colors cursor-pointer group hover:border-blue-500 ${spawnedCount > 0 ? 'border-yellow-500/40' : 'border-gray-700'}`}
                         title={isPipMode ? "點擊切換/新增追蹤" : "點擊搜尋/切換王"}
                       >
                         {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className={`w-full h-full object-cover transition-transform group-hover:scale-110`} /> : <Skull className={`w-6 h-6 transition-transform group-hover:scale-110 ${spawnedCount > 0 ? 'text-yellow-400' : 'text-gray-500'}`} />}
@@ -1464,14 +1484,14 @@
                         </div>
                       </div>
                       <div className="flex flex-col">
-                        <div className="flex items-center flex-wrap gap-2">
-                          <h3 className="text-lg sm:text-xl font-bold text-white">{group.name}</h3>
-                          {group.level && <span className="text-yellow-400 text-sm sm:text-base font-bold">Lv.{group.level}</span>}
-                          <span className="text-[11px] sm:text-xs text-gray-400 bg-gray-900 px-2 py-0.5 rounded border border-gray-700 font-medium whitespace-nowrap ml-0.5">
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <h3 className={`${isPipMode ? 'text-base' : 'text-lg sm:text-xl'} font-bold text-white`}>{group.name}</h3>
+                          {group.level && <span className={`text-yellow-400 font-bold ${isPipMode ? 'text-sm' : 'text-sm sm:text-base'}`}>Lv.{group.level}</span>}
+                          <span className={`text-gray-400 bg-gray-900 rounded border border-gray-700 font-medium whitespace-nowrap ${isPipMode ? 'text-[10px] px-1.5 py-0.5' : 'text-[11px] sm:text-xs px-2 py-0.5 ml-0.5'}`}>
                             CD: {group.minCooldown || group.cooldownMinutes}{group.maxCooldown && group.maxCooldown !== (group.minCooldown || group.cooldownMinutes) ? `~${group.maxCooldown}` : ''}分
                           </span>
                         </div>
-                        <div className="text-sm mt-1 flex items-center gap-1.5 sm:gap-2">
+                        <div className={`mt-0.5 flex items-center gap-1.5 ${isPipMode ? 'text-[11px]' : 'text-sm sm:gap-2'}`}>
                           <span className="text-gray-400">最快:</span>
                           <CountdownTimer nextSpawnTime={group.earliestSpawn} maxSpawnTime={group.earliestMaxSpawn} />
                         </div>
@@ -1489,42 +1509,48 @@
                         </button>
                       )}
                       {isPipMode && (
-                        <button onClick={(e) => { e.stopPropagation(); setPipBossIds(prev => prev.filter(id => id !== group.id)); }} className="p-2 bg-gray-900 hover:bg-red-900/50 hover:text-red-400 border border-transparent hover:border-red-500/50 rounded-full transition-colors shrink-0" title="移除監控">
-                          <X className="w-5 h-5 text-gray-400" />
+                        <button onClick={(e) => { e.stopPropagation(); setPipBossIds(prev => prev.filter(id => id !== group.id)); }} className="p-1 bg-gray-900 hover:bg-red-900/50 hover:text-red-400 border border-transparent hover:border-red-500/50 rounded-full transition-colors shrink-0" title="移除監控">
+                          <X className="w-4 h-4 text-gray-400" />
                         </button>
                       )}
                     </div>
                   </div>
 
-                  {/* 快速新增表單：總是顯示，但 PiP 下壓縮內距以節省空間 */}
-                  <div className={`${isPipMode ? 'p-2' : 'px-4 py-3 sm:px-5 sm:py-4'} bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 shrink-0 z-10 shadow-lg`}>
-                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className="flex flex-col gap-2 bg-gray-900/80 p-2 sm:p-3 rounded-xl border border-gray-700/80 shadow-inner">
-                      <div className="flex flex-wrap gap-2">
-                        <div className="flex flex-1 gap-2 min-w-[200px]">
-                          <div className="w-[110px] sm:w-[130px] shrink-0 relative">
-                            <MapPin className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                            <input type="number" min="1" value={currentChannel} onChange={e => setModalChannelInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-8 pr-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center" required />
-                          </div>
-                          <div className="flex-1">
-                            <input type="text" value={currentMemo} onChange={e => setModalMemoInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder="備註 (選填, 例: 掉寶)" className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
-                          </div>
+                  {/* 快速新增表單 (針對 PiP 與主畫面分開排版) */}
+                  <div className={`${isPipMode ? 'px-3 py-2' : 'px-4 py-3 sm:px-5 sm:py-4'} bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 shrink-0 z-10 shadow-lg`}>
+                    <form onSubmit={(e) => { e.preventDefault(); handleModalQuickAdd(group); }} className={`flex flex-col bg-gray-900/80 rounded-xl border border-gray-700/80 shadow-inner ${isPipMode ? 'gap-2 p-2' : 'gap-2 p-2 sm:p-3'}`}>
+                      {/* 上排：分流 與 備註 */}
+                      <div className={`flex w-full ${isPipMode ? 'gap-2' : 'gap-2'}`}>
+                        <div className={`shrink-0 relative ${isPipMode ? 'w-[80px]' : 'w-[110px] sm:w-[130px]'}`}>
+                          <MapPin className={`text-gray-500 absolute top-1/2 -translate-y-1/2 ${isPipMode ? 'w-3.5 h-3.5 left-2' : 'w-4 h-4 left-2.5'}`} />
+                          <input type="number" min="1" value={currentChannel} 
+                                 onChange={e => {
+                                   const val = e.target.value;
+                                   if (val.length <= 4) setModalChannelInput(prev => ({...prev, [group.id]: val}));
+                                 }} 
+                                 placeholder="分流" className={`w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center ${isPipMode ? 'pl-6 pr-1 py-1.5 text-xs' : 'pl-8 pr-2 py-2 text-sm'}`} required />
                         </div>
+                        <div className="flex-1 min-w-0">
+                          <input type="text" value={currentMemo} onChange={e => setModalMemoInput(prev => ({...prev, [group.id]: e.target.value}))} placeholder={isPipMode ? "備註(選填)" : "備註 (選填, 例: 掉寶)"} className={`w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isPipMode ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'}`} />
+                        </div>
+                      </div>
 
-                        <div className="flex w-full sm:w-auto items-center gap-1.5 shrink-0 justify-end">
-                          <select value={currentKillDate} onChange={e=>setModalKillDateSelect(prev => ({...prev, [group.id]: e.target.value}))} className="w-[65px] bg-gray-800 border border-gray-600 rounded-lg px-1 py-2 text-white text-sm focus:outline-none focus:border-blue-500 text-center">
-                            <option value="today">今天</option>
-                            <option value="yesterday">昨天</option>
-                          </select>
-                          <input type="time" step="1" value={currentKillTime} onChange={e => setModalKillTimeInput(prev => ({...prev, [group.id]: e.target.value}))} className="w-[105px] bg-gray-800 border border-gray-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]" title="擊殺時間 (空白為現在)" />
-                          <button type="submit" disabled={isReporting || !currentChannel.trim()} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 h-[38px] min-w-[70px]">
-                            登記
-                          </button>
-                        </div>
+                      {/* 下排：日期、時間、登記按鈕 */}
+                      <div className={`flex w-full items-center justify-end ${isPipMode ? 'gap-1.5' : 'gap-1.5'}`}>
+                        <select value={currentKillDate} onChange={e=>setModalKillDateSelect(prev => ({...prev, [group.id]: e.target.value}))} className={`bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center ${isPipMode ? 'w-[55px] px-1 py-1.5 text-xs' : 'w-[65px] px-1 py-2 text-sm'}`}>
+                          <option value="today">今天</option>
+                          <option value="yesterday">昨天</option>
+                        </select>
+                        <input type="time" step="1" value={currentKillTime} onChange={e => setModalKillTimeInput(prev => ({...prev, [group.id]: e.target.value}))} className={`bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 [color-scheme:dark] ${isPipMode ? 'w-[85px] px-1 py-1.5 text-xs' : 'w-[105px] px-2 py-2 text-sm'}`} title="擊殺時間 (空白為現在)" />
+                        <button type="submit" disabled={isReporting || !currentChannel.trim()} className={`bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors disabled:opacity-50 ${isPipMode ? 'px-3 py-1.5 text-xs h-[28px] min-w-[50px]' : 'px-4 py-2 text-sm h-[38px] min-w-[70px]'}`}>
+                          登記
+                        </button>
                       </div>
                     </form>
                   </div>
 
-                  <div className={`${isPipMode ? 'p-2 pb-2' : 'p-4 sm:p-5 pb-6'} overflow-y-auto flex flex-col gap-3 relative z-0 flex-1 min-h-0`}>
+                  {/* 包含 min-h-0 以強制啟用內層獨立 Scroll */}
+                  <div className={`${isPipMode ? 'p-1.5 pb-1.5 gap-1.5' : 'p-4 sm:p-5 pb-6 gap-3'} overflow-y-auto flex flex-col relative z-0 flex-1 min-h-0`}>
                     <div className="flex flex-wrap items-center justify-between gap-3 shrink-0 mb-1">
                       {/* 子母畫面中隱藏顏色圖例介紹，以節省空間 */}
                       {!isPipMode && (
@@ -1550,7 +1576,7 @@
                       {(canDeleteStale || canDeleteAll) && group.channels.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap justify-end w-full sm:w-auto mt-2 sm:mt-0">
                           {canDeleteAll && (
-                             <button onClick={() => handleClearAllRecords(group)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/60 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/80 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
+                             <button onClick={() => handleClearAllRecords(group)} disabled={isReporting} className={`flex items-center gap-1.5 bg-gray-800 hover:bg-red-900/60 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/80 rounded-xl font-bold transition-all disabled:opacity-50 whitespace-nowrap ${isPipMode ? 'px-2 py-1 text-xs' : 'px-3 py-2 text-xs'}`}>
                                <Trash2 className="w-3.5 h-3.5" /> 清空此王
                              </button>
                           )}
@@ -1560,7 +1586,7 @@
                                 <select 
                                    value={staleClearHours} 
                                    onChange={(e)=>setStaleClearHours(Number(e.target.value))}
-                                   className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-2 outline-none focus:border-red-500/50"
+                                   className={`bg-gray-800 border border-gray-700 text-gray-300 rounded-lg outline-none focus:border-red-500/50 ${isPipMode ? 'px-1 py-1 text-xs' : 'px-2 py-2 text-xs'}`}
                                 >
                                    <option value={1}>1小時+</option>
                                    <option value={2}>2小時+</option>
@@ -1569,13 +1595,13 @@
                                    <option value={8}>8小時+</option>
                                    <option value={12}>12小時+</option>
                                 </select>
-                                <button onClick={() => handleClearStaleRecords(group, staleClearHours)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
-                                  <Trash2 className="w-3.5 h-3.5" /> 清除過期
+                                <button onClick={() => handleClearStaleRecords(group, staleClearHours)} disabled={isReporting} className={`flex items-center gap-1.5 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl font-bold transition-all disabled:opacity-50 whitespace-nowrap ${isPipMode ? 'px-2 py-1 text-xs' : 'px-3 py-2 text-xs'}`}>
+                                  <Trash2 className="w-3.5 h-3.5" /> 清除
                                 </button>
                               </>
                             ) : (
-                              <button onClick={() => handleClearStaleRecords(group, 4)} disabled={isReporting} className="flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl text-xs font-bold transition-all disabled:opacity-50 whitespace-nowrap">
-                                <Trash2 className="w-3.5 h-3.5" /> 清除過期 (4hr+)
+                              <button onClick={() => handleClearStaleRecords(group, 4)} disabled={isReporting} className={`flex items-center gap-1.5 bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/50 rounded-xl font-bold transition-all disabled:opacity-50 whitespace-nowrap ${isPipMode ? 'px-2 py-1 text-xs' : 'px-3 py-2 text-xs'}`}>
+                                <Trash2 className="w-3.5 h-3.5" /> 清4hr+
                               </button>
                             )
                           )}
@@ -1632,7 +1658,7 @@
                               <div key={active.id} className={`flex flex-col rounded-lg border relative transition-all duration-300 overflow-hidden shrink-0 ${isSpawned ? 'bg-green-500/10 border-green-500/30' : isFloating ? 'bg-yellow-500/10 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : isWarning ? 'bg-red-900/30 border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : isRekilled ? 'bg-purple-900/20 border-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.1)]' : 'bg-gray-800 border-gray-700'}`}>
                                 {isWarning && <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>}
                                 
-                                <div className="flex items-center justify-between p-1 sm:p-1.5 relative z-10 w-full">
+                                <div className={`flex items-center justify-between ${isPipMode ? 'p-1.5' : 'p-1 sm:p-1.5'} relative z-10 w-full`}>
                                   <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
                                     <div 
                                       onClick={(e) => {
@@ -1641,11 +1667,11 @@
                                             setExpandedMemoId(prev => ({...prev, [group.id]: prev[group.id] === active.id ? null : active.id}));
                                         }
                                       }}
-                                      className={`relative flex items-center justify-center border rounded px-2 sm:px-3 py-0.5 sm:py-1 min-w-[3rem] sm:min-w-[4rem] shrink-0 transition-colors ${active.memo ? 'cursor-pointer hover:brightness-125' : ''} ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : isRekilled ? 'bg-purple-900/50 border-purple-500/50' : 'bg-gray-900 border-gray-600'}`}
+                                      className={`relative flex items-center justify-center border rounded ${isPipMode ? 'px-2 py-1 min-w-[3rem]' : 'px-2 sm:px-3 py-0.5 sm:py-1 min-w-[3rem] sm:min-w-[4rem]'} shrink-0 transition-colors ${active.memo ? 'cursor-pointer hover:brightness-125' : ''} ${isSpawned ? 'bg-green-900/50 border-green-500/50' : isFloating ? 'bg-yellow-900/50 border-yellow-500/50' : isWarning ? 'bg-red-900/50 border-red-500/50' : isRekilled ? 'bg-purple-900/50 border-purple-500/50' : 'bg-gray-900 border-gray-600'}`}
                                       title={active.memo ? "點擊顯示備註" : ""}
                                     >
                                       <div className={`font-bold leading-none flex items-baseline justify-center ${isSpawned ? 'text-green-400' : isFloating ? 'text-yellow-400' : isWarning ? 'text-red-400' : isRekilled ? 'text-purple-400' : 'text-blue-400'}`}>
-                                        <span className="text-[13px] sm:text-[15px]">{active.channel}</span>
+                                        <span className={`${isPipMode ? 'text-xs' : 'text-[13px] sm:text-[15px]'}`}>{active.channel}</span>
                                       </div>
                                       {active.memo && (
                                         <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-3 h-3 flex items-center justify-center rounded-full shadow-[0_0_5px_rgba(239,68,68,0.8)] border border-gray-800">
@@ -1653,19 +1679,19 @@
                                         </div>
                                       )}
                                     </div>
-                                    <div className="text-[10px] sm:text-[11px] text-gray-400 flex items-center gap-1 min-w-0">
+                                    <div className="text-[11px] sm:text-[11px] text-gray-400 flex items-center gap-1 min-w-0">
                                       <span className="flex items-center gap-1 text-gray-300 whitespace-nowrap">
-                                        <History className="w-3 h-3 shrink-0"/> 
-                                        {new Date(active.lastKilled).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                                        <span className="text-blue-300/80 ml-1 font-medium inline-block max-w-[50px] sm:max-w-none truncate align-bottom" title={active.reporterName}>({active.reporterName || '未知'})</span>
+                                        <History className={`${isPipMode ? 'w-3 h-3' : 'w-3 h-3'} shrink-0`}/>
+                                        <span className={isPipMode ? 'text-[11px]' : ''}>{new Date(active.lastKilled).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                                        <span className={`text-blue-300/80 font-medium inline-block truncate align-bottom ${isPipMode ? 'ml-0.5 max-w-[50px] text-[11px]' : 'ml-1 max-w-[50px] sm:max-w-none'}`} title={active.reporterName}>({active.reporterName || '未知'})</span>
                                       </span>
                                     </div>
                                   </div>
                                   
-                                  <div className="flex items-center justify-end gap-1 sm:gap-1.5 relative z-10 shrink-0 ml-1">
-                                    {isWarning && <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-red-500 animate-bounce mr-1" />}
+                                  <div className="flex items-center justify-end gap-1.5 sm:gap-1.5 relative z-10 shrink-0 ml-1">
+                                    {isWarning && <Flame className={`text-red-500 animate-bounce mr-1 ${isPipMode ? 'w-3 h-3' : 'w-3 h-3 sm:w-3.5 sm:h-3.5'}`} />}
                                     
-                                    <span className={`text-[11px] sm:text-xs mr-1 ${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300' : 'text-gray-300'}`}>
+                                    <span className={`mr-1 ${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300' : 'text-gray-300'} ${isPipMode ? 'text-[11px]' : 'text-[11px] sm:text-xs'}`}>
                                        <CountdownTimer nextSpawnTime={active.nextSpawn} maxSpawnTime={active.maxSpawn} />
                                     </span>
                                     
@@ -1706,7 +1732,7 @@
                                             onMouseLeave={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
                                             onContextMenu={(e) => e.preventDefault()}
                                             style={{ WebkitTouchCallout: 'none' }}
-                                            className={`w-6 h-6 sm:w-7 sm:h-7 rounded text-[10px] sm:text-xs transition-colors flex items-center justify-center shrink-0 border select-none touch-manipulation ${localPatrols[active.id] ? 'bg-cyan-600/20 text-cyan-400 border-cyan-500/30' : 'bg-gray-700/50 text-gray-400 border-gray-600/50 hover:bg-gray-600'}`} 
+                                            className={`rounded transition-colors flex items-center justify-center shrink-0 border select-none touch-manipulation ${localPatrols[active.id] ? 'bg-cyan-600/20 text-cyan-400 border-cyan-500/30' : 'bg-gray-700/50 text-gray-400 border-gray-600/50 hover:bg-gray-600'} ${isPipMode ? 'w-6 h-6 text-[10px]' : 'w-6 h-6 sm:w-7 sm:h-7 text-[10px] sm:text-xs'}`} 
                                             title={localPatrols[active.id] ? `您於 ${new Date(localPatrols[active.id]).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', hour12:false})} 標記檢查` : "標記個人巡邏 (無讀取消耗, 僅自己可見)"}
                                           >
                                             <span>⌛</span>
@@ -1719,17 +1745,17 @@
                                                e.stopPropagation(); 
                                                setRekillModalData(active);
                                                setRekillMemo(''); // 確保每次點開都是空的
-                                            }} className="w-6 h-6 sm:w-7 sm:h-7 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded text-xs transition-colors flex items-center justify-center shrink-0" title="再次擊殺">⚔️</button>
+                                            }} className={`bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 rounded transition-colors flex items-center justify-center shrink-0 ${isPipMode ? 'w-6 h-6 text-[10px]' : 'w-6 h-6 sm:w-7 sm:h-7 text-xs'}`} title="再次擊殺">⚔️</button>
                                             
                                             {isSpawned ? (
-                                              <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id, true); }} className="h-6 sm:h-7 px-1.5 sm:px-2 bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded text-[11px] sm:text-xs font-bold transition-colors flex items-center justify-center whitespace-nowrap shrink-0">無王</button>
+                                              <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id, true); }} className={`bg-gray-700/50 text-gray-400 hover:bg-gray-600 border border-gray-600/50 rounded font-bold transition-colors flex items-center justify-center whitespace-nowrap shrink-0 ${isPipMode ? 'h-6 px-1.5 text-[11px]' : 'h-6 sm:h-7 px-1.5 sm:px-2 text-[11px] sm:text-xs'}`}>無王</button>
                                             ) : group.enablePatrol ? (
                                               <button 
                                                 onClick={(e) => { e.stopPropagation(); setPatrolModalData(active); }} 
-                                                className="w-6 h-6 sm:w-7 sm:h-7 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-500/30 rounded transition-colors flex items-center justify-center relative shrink-0" 
+                                                className={`bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-500/30 rounded transition-colors flex items-center justify-center relative shrink-0 ${isPipMode ? 'w-6 h-6' : 'w-6 h-6 sm:w-7 sm:h-7'}`} 
                                                 title={active.patrolHistory && active.patrolHistory.length > 0 ? "開啟巡邏視窗 (已有巡邏紀錄)" : "開啟巡邏視窗"}
                                               >
-                                                <Search className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                                <Search className={isPipMode ? 'w-3 h-3' : 'w-3 h-3 sm:w-3.5 sm:h-3.5'} />
                                                 {active.patrolHistory && active.patrolHistory.length > 0 && (
                                                   <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
                                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
@@ -1743,15 +1769,15 @@
                                     </div>
 
                                     {canDelete && !isSpawned && (
-                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id, false); }} className={`w-6 h-6 sm:w-7 sm:h-7 rounded transition-colors border border-transparent flex items-center justify-center shrink-0 ml-0.5 ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
-                                        <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteActiveBoss(active.id, false); }} className={`rounded transition-colors border border-transparent flex items-center justify-center shrink-0 ml-0.5 ${isWarning ? 'text-red-300 hover:bg-red-500/20' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20'} ${isPipMode ? 'w-6 h-6' : 'w-6 h-6 sm:w-7 sm:h-7'}`} title={isAdmin ? "管理員刪除此紀錄" : "刪除您的紀錄"}>
+                                        <Trash2 className={isPipMode ? 'w-3 h-3' : 'w-3 h-3 sm:w-3.5 sm:h-3.5'} />
                                       </button>
                                     )}
                                   </div>
                                 </div>
                                 
                                 {isExpanded && active.memo && (
-                                  <div className="bg-gray-900/50 border-t border-gray-700/50 p-1 sm:p-1.5 text-[11px] sm:text-xs text-gray-300 animate-in slide-in-from-top-1 px-2 sm:px-3">
+                                  <div className={`bg-gray-900/50 border-t border-gray-700/50 text-gray-300 animate-in slide-in-from-top-1 ${isPipMode ? 'p-1.5 px-2 text-[11px]' : 'p-1 sm:p-1.5 px-2 sm:px-3 text-[11px] sm:text-xs'}`}>
                                     <span className="text-gray-500 font-bold mr-1.5 select-none">備註:</span>
                                     <span className="break-all">{active.memo}</span>
                                   </div>
@@ -1761,15 +1787,15 @@
                           })}
                           
                           {totalPages > 1 && (
-                            <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-700/50 shrink-0 gap-1 sm:gap-2">
+                            <div className={`flex justify-between items-center border-t border-gray-700/50 shrink-0 ${isPipMode ? 'pt-1.5 mt-1 gap-1' : 'pt-2 mt-1 gap-1 sm:gap-2'}`}>
                               <div className="flex gap-1">
-                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: 1}))} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">首頁</button>
-                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: Math.max(1, (prev[group.id] || 1) - 1)}))} disabled={safePage === 1} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">上一頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: 1}))} disabled={safePage === 1} className={`bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded transition-colors text-white font-medium ${isPipMode ? 'px-2 py-1 text-[11px]' : 'px-2 sm:px-3 py-1.5 text-xs'}`}>首頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: Math.max(1, (prev[group.id] || 1) - 1)}))} disabled={safePage === 1} className={`bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded transition-colors text-white font-medium ${isPipMode ? 'px-2 py-1 text-[11px]' : 'px-2 sm:px-3 py-1.5 text-xs'}`}>上一頁</button>
                               </div>
-                              <span className="text-gray-400 text-xs font-medium whitespace-nowrap">第 {safePage} / {totalPages} 頁</span>
+                              <span className={`text-gray-400 font-medium whitespace-nowrap ${isPipMode ? 'text-[11px]' : 'text-xs'}`}>第 {safePage} / {totalPages} 頁</span>
                               <div className="flex gap-1">
-                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: Math.min(totalPages, (prev[group.id] || 1) + 1)}))} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">下一頁</button>
-                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: totalPages}))} disabled={safePage === totalPages} className="px-2 sm:px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs transition-colors text-white font-medium">末頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: Math.min(totalPages, (prev[group.id] || 1) + 1)}))} disabled={safePage === totalPages} className={`bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded transition-colors text-white font-medium ${isPipMode ? 'px-2 py-1 text-[11px]' : 'px-2 sm:px-3 py-1.5 text-xs'}`}>下一頁</button>
+                                <button onClick={() => setModalPage(prev => ({...prev, [group.id]: totalPages}))} disabled={safePage === totalPages} className={`bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded transition-colors text-white font-medium ${isPipMode ? 'px-2 py-1 text-[11px]' : 'px-2 sm:px-3 py-1.5 text-xs'}`}>末頁</button>
                               </div>
                             </div>
                           )}
@@ -1797,7 +1823,7 @@
                     </div>
                     
                     {/* 還原為 50/50 比例，移除全域 scroll，利用 min-h-0 強制限制子元素捲動不推擠 */}
-                    <div className="flex-1 flex flex-col overflow-hidden">
+                    <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                       {pipBossIds.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full flex-1 text-gray-500 p-4">
                           <PictureInPicture className="w-12 h-12 mb-4 opacity-50" />
@@ -1809,7 +1835,7 @@
                            const group = displayBosses.all.find(g => g.id === id);
                            if (!group) return null;
                            return (
-                              <div key={id} className={`flex flex-col min-h-0 overflow-hidden ${pipBossIds.length === 2 ? 'h-1/2 border-b border-gray-700' : 'h-full'}`}>
+                              <div key={id} className={`flex flex-col overflow-hidden min-h-0 ${pipBossIds.length === 2 ? 'h-1/2 border-b border-gray-700' : 'h-full'}`}>
                                  {renderBossInnerContent(group, true, index)}
                               </div>
                            );
@@ -1839,8 +1865,8 @@
             
             <header className="flex flex-col md:flex-row md:items-center justify-between bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700 gap-4">
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-gray-900 rounded-xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg shrink-0">
-                  <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
+                <div className="relative w-14 h-14 bg-gray-900 rounded-xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg shrink-0">
+                  <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover relative z-10" onError={(e) => e.target.style.display='none'} />
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時</h1>
@@ -2186,7 +2212,7 @@
                       {displayBosses.main.map(group => {
                         const isPinned = pinnedBosses.includes(group.id);
                         
-                        const currentNow = Date.now();
+                        const currentNow = currentTime;
                         // 統計進入浮動(黃)或已重生(綠)的頻道總數
                         const spawnedChannels = group.channels.filter(ch => {
                           const diffToNext = ch.nextSpawn - currentNow;
