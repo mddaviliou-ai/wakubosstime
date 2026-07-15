@@ -2256,21 +2256,33 @@
                             <button onClick={(e) => togglePin(e, group.id)} className="absolute top-2 right-2 p-1.5 rounded-full bg-gray-900/50 hover:bg-gray-700 transition-colors z-20 group" title={isPinned ? "取消釘選" : "釘選置頂"}>
                                <Star className={`w-4 h-4 transition-all ${isPinned ? 'fill-yellow-500 text-yellow-500' : 'text-gray-500 group-hover:text-yellow-400'}`} />
                             </button>
-
-                            <div className="p-4 sm:p-5 flex items-center justify-between select-none bg-gray-800 hover:bg-gray-750 transition-colors">
-                              <div className="flex items-center gap-4">
+<div className="p-4 sm:p-5 flex items-center justify-between select-none bg-gray-800 hover:bg-gray-750 transition-colors">
+                              <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
                                 <div className={`flex shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gray-900 items-center justify-center border overflow-hidden ${spawnedCount > 0 ? 'border-yellow-500/40' : 'border-gray-700'}`}>
                                   {group.imageUrl ? <img src={group.imageUrl} alt={group.name} className="w-full h-full object-cover" /> : <Skull className={`w-6 h-6 ${spawnedCount > 0 ? 'text-yellow-400' : 'text-gray-500'}`} />}
                                 </div>
-                                <div>
-                                  <h3 className="text-lg sm:text-xl font-bold text-white flex items-center flex-wrap gap-2 pr-6">
-                                    {group.name} {group.level && <span className="text-yellow-400 text-sm sm:text-base">Lv.{group.level}</span>}
-                                    {group.channels.length > 0 && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">{group.channels.length} 分流</span>}
-                                    {spawnedCount > 0 && <span className="text-[11px] font-bold bg-yellow-500 text-gray-900 px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(234,179,8,0.6)] animate-pulse">{spawnedCount} 可確認</span>}
-                                  </h3>
-                                  <div className="text-sm mt-1 flex items-center gap-1.5 sm:gap-2">
-                                    <span className="text-gray-400 hidden sm:inline">最快重生:</span>
-                                    <CountdownTimer nextSpawnTime={group.earliestSpawn} maxSpawnTime={group.earliestMaxSpawn} />
+                                <div className="flex flex-col gap-1.5 flex-1 min-w-0 pr-4 sm:pr-6">
+                                  <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+                                    <h3 className="text-lg sm:text-xl font-bold text-white leading-none">
+                                      {group.name}
+                                    </h3>
+                                    {group.level && <span className="text-yellow-400 text-sm sm:text-base font-bold leading-none">Lv.{group.level}</span>}
+                                    <div className="text-[14px] sm:text-sm font-medium leading-none sm:ml-1 mt-[1px]">
+                                      <CountdownTimer nextSpawnTime={group.earliestSpawn} maxSpawnTime={group.earliestMaxSpawn} />
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center flex-wrap gap-2 min-h-[22px]">
+                                    {group.channels.length > 0 && (
+                                      <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30 leading-none">
+                                        {group.channels.length} 分流
+                                      </span>
+                                    )}
+                                    {spawnedCount > 0 && (
+                                      <span className="text-[11px] sm:text-xs font-bold bg-yellow-500 text-gray-900 px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(234,179,8,0.6)] animate-pulse leading-none">
+                                        {spawnedCount} 可確認
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -2278,8 +2290,7 @@
                           </div>
                         );
                       })}
-                    </div>
-                  )}
+                    </div>                  )}
                 </section>
               </>
             )}
