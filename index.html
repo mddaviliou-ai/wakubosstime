@@ -486,7 +486,6 @@
 
       const [adminTab, setAdminTab] = useState('home'); 
       const [showPwdModal, setShowPwdModal] = useState(false);
-      const [newPwd, setNewPwd] = useState('');
       const [patrolModalData, setPatrolModalData] = useState(null); 
       
       // 個人成就與排行榜
@@ -1469,9 +1468,24 @@
             </div>
           )}
 
-          {/* 單王擊殺排行榜面板 🎯 */}
+          {/* 單王擊殺排行榜面板 🎯 (加入 4 小時本地快取機制) */}
           {leaderboardModalData && (() => {
             const boss = leaderboardModalData;
+            const cache = JSON.parse(localStorage.getItem('wakuboss_lb_cache') || '{}');
+            const entry = cache[boss.id];
+            
+            // 判斷是否冷卻完畢 (4 小時 = 14400000 毫秒)
+            const cooldownDuration = 4 * 60 * 60 * 1000;
+            const canFetch = !entry || (currentTime - entry.timestamp >= cooldownDuration);
+
+            const formatCD = (diffMs) => {
+              if (diffMs <= 0) return '00:00:00';
+              const h = Math.floor(diffMs / 3600000);
+              const m = Math.floor((diffMs % 3600000) / 60000);
+              const s = Math.floor((diffMs % 60000) / 1000);
+              return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+            };
+
             return (
               <div className="fixed inset-0 bg-black/80 z-[250] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setLeaderboardModalData(null)}>
                 <div className="bg-gray-800 p-6 rounded-2xl border border-blue-500/30 shadow-[0_0_30px_rgba(59,130,246,0.15)] w-full max-w-sm max-h-[80vh] flex flex-col" onClick={e=>e.stopPropagation()}>
@@ -1485,26 +1499,7 @@
                   <div className="overflow-y-auto pr-2 flex-1 min-h-[150px]">
                     {leaderboardData === null ? (
                       <div className="flex flex-col items-center justify-center py-6 text-center">
-                        <p className="text-gray-400 text-sm mb-4 leading-relaxed">此功能會消耗資料庫讀取量，<br/>請點擊下方按鈕獲取最新排行。</p>
-                        <button 
-                          onClick={async () => {
-                            setIsLoadingLeaderboard(true);
-                            try {
-                              // 在客戶端進行排序，避免需要建立 Firebase 複合索引 (Composite Index)
-                              const q = query(collection(db, 'userKills'), where('bossId', '==', boss.id));
-                              const snap = await getDocs(q);
-                              const data = snap.docs.map(d => d.data());
-                              data.sort((a, b) => b.count - a.count); // 依擊殺數排序
-                              setLeaderboardData(data.slice(0, 50)); // 取前 50 名
-                            } catch(e) { showMessage('讀取排行失敗，請稍後再試', 'error'); }
-                            setIsLoadingLeaderboard(false);
-                          }}
-                          disabled={isLoadingLeaderboard}
-                          className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-lg flex items-center gap-2 disabled:opacity-50"
-                        >
-                          {isLoadingLeaderboard ? <Activity className="w-4 h-4 animate-spin"/> : <Search className="w-4 h-4"/>} 
-                          獲取排行資料
-                        </button>
+                        <p className="text-gray-400 text-sm leading-relaxed">請點擊下方按鈕更新最新排行。</p>
                       </div>
                     ) : leaderboardData.length === 0 ? (
                       <p className="text-gray-500 text-center py-8">目前尚未有玩家擊殺此王。</p>
@@ -1531,6 +1526,39 @@
                         })}
                       </div>
                     )}
+                  </div>
+
+                  {/* 底部按鈕區塊 (快取與冷卻邏輯) */}
+                  <div className="mt-4 pt-3 border-t border-gray-700 flex flex-col gap-2 shrink-0">
+                    <button 
+                      onClick={async () => {
+                        setIsLoadingLeaderboard(true);
+                        try {
+                          const q = query(collection(db, 'userKills'), where('bossId', '==', boss.id));
+                          const snap = await getDocs(q);
+                          const data = snap.docs.map(d => d.data());
+                          data.sort((a, b) => b.count - a.count); 
+                          const finalData = data.slice(0, 50); // 取前 50 名
+                          setLeaderboardData(finalData);
+
+                          // 將資料寫入本地 localStorage 快取並記錄時間
+                          const newCache = { ...cache, [boss.id]: { data: finalData, timestamp: Date.now() } };
+                          localStorage.setItem('wakuboss_lb_cache', JSON.stringify(newCache));
+                        } catch(e) { showMessage('讀取排行失敗，請稍後再試', 'error'); }
+                        setIsLoadingLeaderboard(false);
+                      }}
+                      disabled={!canFetch || isLoadingLeaderboard}
+                      className={`w-full font-bold px-4 py-3 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 ${canFetch ? 'bg-blue-600 hover:bg-blue-500 text-white active:scale-95' : 'bg-gray-700/80 text-gray-400 cursor-not-allowed border border-gray-600/50'}`}
+                    >
+                      {isLoadingLeaderboard ? <Activity className="w-5 h-5 animate-spin"/> : <Search className="w-4 h-4"/>} 
+                      {canFetch 
+                        ? (entry ? '同步伺服器最新排行' : '獲取最新排行') 
+                        : `冷卻中 (${formatCD((entry.timestamp + cooldownDuration) - currentTime)})`
+                      }
+                    </button>
+                    <p className="text-center text-[11px] text-gray-500 mt-1">
+                      為節省系統資源，排行資料將暫存在本地 4 小時。
+                    </p>
                   </div>
                 </div>
               </div>
@@ -2544,7 +2572,16 @@
                             </button>
 
                             {/* 🎯 擊殺排行榜按鈕 */}
-                            <button onClick={(e) => { e.stopPropagation(); setLeaderboardModalData(group); setLeaderboardData(null); }} className="absolute top-[42px] right-2 p-1.5 rounded-full bg-gray-900/50 hover:bg-gray-700 transition-colors z-20 group border border-transparent hover:border-blue-500/50" title="擊殺排行榜">
+                            <button onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setLeaderboardModalData(group); 
+                              const cache = JSON.parse(localStorage.getItem('wakuboss_lb_cache') || '{}');
+                              if (cache[group.id]) {
+                                setLeaderboardData(cache[group.id].data);
+                              } else {
+                                setLeaderboardData(null);
+                              }
+                            }} className="absolute top-[42px] right-2 p-1.5 rounded-full bg-gray-900/50 hover:bg-gray-700 transition-colors z-20 group border border-transparent hover:border-blue-500/50" title="擊殺排行榜">
                                <span className="text-sm leading-none flex items-center justify-center w-4 h-4 grayscale group-hover:grayscale-0 transition-all opacity-60 group-hover:opacity-100">🎯</span>
                             </button>
 
