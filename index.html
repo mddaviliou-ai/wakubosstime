@@ -1479,8 +1479,8 @@
             const cooldownDuration = 4 * 60 * 60 * 1000;
             const isBossOnCooldown = entry && (currentTime - entry.timestamp < cooldownDuration);
 
-            // 全域額度 4 小時一次性補滿邏輯
-            let quotaData = JSON.parse(localStorage.getItem('wakuboss_lb_quota') || '{"used": 0, "resetAt": 0}');
+            // 全域額度 4 小時一次性補滿邏輯 (綁定 appUser.id 確保每人獨立)
+            let quotaData = JSON.parse(localStorage.getItem(`wakuboss_lb_quota_${appUser.id}`) || '{"used": 0, "resetAt": 0}');
             
             // 如果現在時間已經超過了重置時間，就將額度歸零（補滿）
             if (quotaData.resetAt > 0 && currentTime >= quotaData.resetAt) {
@@ -1575,14 +1575,14 @@
                           const newCache = { ...cache, [boss.id]: { data: finalData, timestamp: Date.now() } };
                           localStorage.setItem('wakuboss_lb_cache', JSON.stringify(newCache));
 
-                          // 扣除額度並設定補滿時間
+                          // 扣除額度並設定補滿時間 (綁定 appUser.id)
                           let newQuota = { ...quotaData };
                           if (newQuota.used === 0) {
                             // 若原本是滿的，第一次使用時開始啟動 4 小時的重置倒數
                             newQuota.resetAt = Date.now() + cooldownDuration;
                           }
                           newQuota.used += 1;
-                          localStorage.setItem('wakuboss_lb_quota', JSON.stringify(newQuota));
+                          localStorage.setItem(`wakuboss_lb_quota_${appUser.id}`, JSON.stringify(newQuota));
 
                         } catch(e) { showMessage('讀取排行失敗，請稍後再試', 'error'); }
                         setIsLoadingLeaderboard(false);
