@@ -486,6 +486,7 @@
 
       const [adminTab, setAdminTab] = useState('home'); 
       const [showPwdModal, setShowPwdModal] = useState(false);
+      const [newPwd, setNewPwd] = useState('');
       const [patrolModalData, setPatrolModalData] = useState(null); 
       
       // 個人成就與排行榜
@@ -1474,9 +1475,26 @@
             const cache = JSON.parse(localStorage.getItem('wakuboss_lb_cache') || '{}');
             const entry = cache[boss.id];
             
-            // 判斷是否冷卻完畢 (4 小時 = 14400000 毫秒)
+            // 單王 4 小時冷卻判定
             const cooldownDuration = 4 * 60 * 60 * 1000;
-            const canFetch = !entry || (currentTime - entry.timestamp >= cooldownDuration);
+            const isBossOnCooldown = entry && (currentTime - entry.timestamp < cooldownDuration);
+
+            // 全域額度 4 小時一次性補滿邏輯
+            let quotaData = JSON.parse(localStorage.getItem('wakuboss_lb_quota') || '{"used": 0, "resetAt": 0}');
+            
+            // 如果現在時間已經超過了重置時間，就將額度歸零（補滿）
+            if (quotaData.resetAt > 0 && currentTime >= quotaData.resetAt) {
+              quotaData = { used: 0, resetAt: 0 };
+            }
+
+            const availableQuota = 3 - quotaData.used;
+            const isQuotaEmpty = availableQuota <= 0;
+            
+            // 取得下一次額度補滿的時間戳
+            const nextRecoveryTime = quotaData.resetAt > currentTime ? quotaData.resetAt : null;
+            
+            // 是否允許向伺服器拉取資料
+            const canFetch = !isBossOnCooldown && !isQuotaEmpty;
 
             const formatCD = (diffMs) => {
               if (diffMs <= 0) return '00:00:00';
@@ -1530,8 +1548,20 @@
 
                   {/* 底部按鈕區塊 (快取與冷卻邏輯) */}
                   <div className="mt-4 pt-3 border-t border-gray-700 flex flex-col gap-2 shrink-0">
+                    <div className="flex justify-between items-center px-1 mb-1">
+                       <span className="text-[11px] text-gray-400">
+                         獲取額度
+                         {nextRecoveryTime ? (
+                           <span className="text-yellow-400 ml-1">({formatCD(nextRecoveryTime - currentTime)} 後補滿)</span>
+                         ) : (
+                           <span className="ml-1">(每 4 小時補滿 3 次)</span>
+                         )}
+                       </span>
+                       <span className={`text-xs font-bold ${availableQuota > 0 ? 'text-blue-400' : 'text-red-400'}`}>{Math.max(0, availableQuota)} / 3 次</span>
+                    </div>
                     <button 
                       onClick={async () => {
+                        if (!canFetch) return;
                         setIsLoadingLeaderboard(true);
                         try {
                           const q = query(collection(db, 'userKills'), where('bossId', '==', boss.id));
@@ -1544,6 +1574,16 @@
                           // 將資料寫入本地 localStorage 快取並記錄時間
                           const newCache = { ...cache, [boss.id]: { data: finalData, timestamp: Date.now() } };
                           localStorage.setItem('wakuboss_lb_cache', JSON.stringify(newCache));
+
+                          // 扣除額度並設定補滿時間
+                          let newQuota = { ...quotaData };
+                          if (newQuota.used === 0) {
+                            // 若原本是滿的，第一次使用時開始啟動 4 小時的重置倒數
+                            newQuota.resetAt = Date.now() + cooldownDuration;
+                          }
+                          newQuota.used += 1;
+                          localStorage.setItem('wakuboss_lb_quota', JSON.stringify(newQuota));
+
                         } catch(e) { showMessage('讀取排行失敗，請稍後再試', 'error'); }
                         setIsLoadingLeaderboard(false);
                       }}
@@ -1551,13 +1591,16 @@
                       className={`w-full font-bold px-4 py-3 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 ${canFetch ? 'bg-blue-600 hover:bg-blue-500 text-white active:scale-95' : 'bg-gray-700/80 text-gray-400 cursor-not-allowed border border-gray-600/50'}`}
                     >
                       {isLoadingLeaderboard ? <Activity className="w-5 h-5 animate-spin"/> : <Search className="w-4 h-4"/>} 
-                      {canFetch 
-                        ? (entry ? '同步伺服器最新排行' : '獲取最新排行') 
-                        : `冷卻中 (${formatCD((entry.timestamp + cooldownDuration) - currentTime)})`
+                      {isBossOnCooldown 
+                        ? `此王冷卻中 (${formatCD((entry.timestamp + cooldownDuration) - currentTime)})`
+                        : isQuotaEmpty 
+                          ? `額度耗盡，請等待補滿`
+                          : (entry ? '同步伺服器最新排行' : '獲取最新排行')
                       }
                     </button>
-                    <p className="text-center text-[11px] text-gray-500 mt-1">
-                      為節省系統資源，排行資料將暫存在本地 4 小時。
+                    <p className="text-center text-[11px] text-gray-500 mt-1 leading-relaxed">
+                      為節省伺服器資源，排行資料將暫存 4 小時。<br/>
+                      同隻王刷新需冷卻，且額度每 4 小時會自動補滿。
                     </p>
                   </div>
                 </div>
@@ -1868,7 +1911,7 @@
                       {isPipMode ? (
                         <>
                           {/* 子母畫面：單排極簡模式 (修改下方的 width: '60px' 即可自訂分流格子的寬度，不會再亂跳了) */}
-                          <div className="shrink-0" style={{ width: '85px' }}>
+                          <div className="shrink-0" style={{ width: '60px' }}>
                             <input type="number" min="1" value={currentChannel} 
                                    onChange={e => { const val = e.target.value; if (val.length <= 4) setModalChannelInput(prev => ({...prev, [group.id]: val})); }} 
                                    placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center px-1 py-1 text-xs font-bold" required />
@@ -2016,7 +2059,7 @@
                                   <div className="flex items-center justify-end gap-1 sm:gap-1.5 relative z-10 shrink-0 ml-1">
                                     {isWarning && <Flame className={`text-red-500 animate-bounce ${isPipMode ? 'w-3.5 h-3.5 mr-0.5' : 'w-4 h-4 sm:w-5 sm:h-5 mr-1'}`} />}
                                     
-                                    <span className={`${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300 font-medium' : 'text-gray-300 font-medium'} ${isPipMode ? (isSpawned ? 'text-[12px]' : 'text-[13px]') : 'text-[14px] sm:text-[16px]'}`}>
+                                    <span className={`${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300 font-medium' : 'text-gray-300 font-medium'} ${isPipMode ? (isSpawned ? 'text-[11px]' : 'text-[13px]') : 'text-[14px] sm:text-[16px]'}`}>
                                        <CountdownTimer nextSpawnTime={active.nextSpawn} maxSpawnTime={active.maxSpawn} />
                                     </span>
                                     
