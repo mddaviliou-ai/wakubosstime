@@ -1911,7 +1911,7 @@
                       {isPipMode ? (
                         <>
                           {/* 子母畫面：單排極簡模式 (修改下方的 width: '60px' 即可自訂分流格子的寬度，不會再亂跳了) */}
-                          <div className="shrink-0" style={{ width: '60px' }}>
+                          <div className="shrink-0" style={{ width: '85px' }}>
                             <input type="number" min="1" value={currentChannel} 
                                    onChange={e => { const val = e.target.value; if (val.length <= 4) setModalChannelInput(prev => ({...prev, [group.id]: val})); }} 
                                    placeholder="分流" className="w-full bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-center px-1 py-1 text-xs font-bold" required />
@@ -2059,7 +2059,7 @@
                                   <div className="flex items-center justify-end gap-1 sm:gap-1.5 relative z-10 shrink-0 ml-1">
                                     {isWarning && <Flame className={`text-red-500 animate-bounce ${isPipMode ? 'w-3.5 h-3.5 mr-0.5' : 'w-4 h-4 sm:w-5 sm:h-5 mr-1'}`} />}
                                     
-                                    <span className={`${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300 font-medium' : 'text-gray-300 font-medium'} ${isPipMode ? (isSpawned ? 'text-[11px]' : 'text-[13px]') : 'text-[14px] sm:text-[16px]'}`}>
+                                    <span className={`${isWarning ? 'text-red-400 font-bold' : isRekilled && !isFloating && !isSpawned && !isWarning ? 'text-purple-300 font-medium' : 'text-gray-300 font-medium'} ${isPipMode ? (isSpawned ? 'text-[12px]' : 'text-[13px]') : 'text-[14px] sm:text-[16px]'}`}>
                                        <CountdownTimer nextSpawnTime={active.nextSpawn} maxSpawnTime={active.maxSpawn} />
                                     </span>
                                     
