@@ -413,8 +413,8 @@
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="bg-gray-800 p-8 rounded-3xl shadow-2xl border border-gray-700 w-full max-w-md animate-in zoom-in-95 duration-300">
             <div className="flex flex-col items-center mb-8">
-              <div className="w-20 h-20 mb-4 bg-gray-900 rounded-2xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg">
-                <span className="text-4xl">⏱️</span>
+              <div className="relative w-20 h-20 mb-4 bg-gray-900 rounded-2xl flex items-center justify-center border border-gray-700 overflow-hidden shadow-lg shrink-0">
+                <img src="./logo2.png" alt="Logo" className="w-full h-full object-cover relative z-10" onError={(e) => e.target.style.display='none'} />
               </div>
               <h1 className="text-2xl font-bold text-white tracking-wide">Waku野王重生計時</h1>
               <p className="text-gray-400 mt-2">{isLogin ? '登入以繼續使用' : '註冊新帳號'}</p>
