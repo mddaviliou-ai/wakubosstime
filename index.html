@@ -354,16 +354,37 @@
       const [newPwd, setNewPwd] = useState('');
       const [patrolModalData, setPatrolModalData] = useState(null); 
       
-      // 個人成就與排行榜
+     // 個人成就與排行榜
       const [myKills, setMyKills] = useState({});
+      const [todayKills, setTodayKills] = useState({});
+      const [achievTab, setAchievTab] = useState('total');
       const [showMyAchievModal, setShowMyAchievModal] = useState(false);
-      const [achievViewMode, setAchievViewMode] = useState('total'); 
-      const [killViewMode, setKillViewMode] = useState({});
-
       const [leaderboardModalData, setLeaderboardModalData] = useState(null);
       const [leaderboardData, setLeaderboardData] = useState(null);
       const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
-      
+
+      // 🌟 自動換日與即時同步「今日擊殺」的監聽器
+      useEffect(() => {
+        if (isSleeping || !appUser) return;
+        
+        // 取得當下每秒跳動的真實日期 (使用 en-CA 確保格式永遠為 YYYY-MM-DD)
+        const currentRealDate = new Date(currentTime).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+        const key = `wakuboss_today_kills_${appUser.id}`;
+        
+        let storedData = JSON.parse(localStorage.getItem(key) || '{"date": "", "kills": {}}');
+        
+        // 判定換日：如果快取的日期跟「現在」的日期不同
+        if (storedData.date !== currentRealDate) {
+           // 午夜 24:00 換日！立刻清空本地數據
+           storedData = { date: currentRealDate, kills: {} };
+           localStorage.setItem(key, JSON.stringify(storedData));
+           setTodayKills({}); // 觸發畫面瞬間更新為 0
+        } else {
+           // 保持與本地快取同步 (避免剛登記擊殺時畫面沒更新)
+           setTodayKills(prev => JSON.stringify(prev) !== JSON.stringify(storedData.kills) ? storedData.kills : prev);
+        }
+      }, [currentTime, appUser, isSleeping]);
+
       // 再次擊殺新狀態
       const [rekillModalData, setRekillModalData] = useState(null);
       const [rekillMemo, setRekillMemo] = useState('');
