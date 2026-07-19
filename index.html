@@ -492,6 +492,7 @@
       // 個人成就與排行榜
       const [myKills, setMyKills] = useState({});
       const [todayKills, setTodayKills] = useState({});
+      const [rawKillData, setRawKillData] = useState([]);
       const [achievTab, setAchievTab] = useState('total'); 
       const [showMyAchievModal, setShowMyAchievModal] = useState(false);
       const [leaderboardModalData, setLeaderboardModalData] = useState(null);
@@ -567,63 +568,59 @@
         return () => clearInterval(timer);
       }, [isSleeping]);
 
-      // 自動換日與即時同步「今日擊殺」
+      // Firebase 同步：抓取玩家所有擊殺紀錄的原始資料 (完美解決跨裝置不同步)
+      useEffect(() => {
+        if (!appUser || isSleeping) return;
+        const q = query(collection(db, 'userKills'), where('userId', '==', appUser.id));
+        const unsub = onSnapshot(q, (snap) => {
+          const docs = [];
+          snap.forEach(d => docs.push(d.data()));
+          setRawKillData(docs);
+        });
+        return () => unsub();
+      }, [appUser, isSleeping]);
+
+      // 自動換日與即時解析「總計」與「今日擊殺」
       useEffect(() => {
         if (isSleeping || !appUser) return;
         
         const currentRealDate = new Date(currentTime).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
-        const key = `wakuboss_today_kills_${appUser.id}`;
+        const kills = {};
+        const tKills = {};
         
-        let storedData = JSON.parse(localStorage.getItem(key) || '{"date": "", "kills": {}}');
+        rawKillData.forEach(data => {
+           kills[data.bossId] = data.count;
+           // 如果 Firebase 裡面有存今天的日期，就把數值拉出來，否則預設就是 0
+           if (data.dailyCounts && data.dailyCounts[currentRealDate]) {
+               tKills[data.bossId] = data.dailyCounts[currentRealDate];
+           }
+        });
         
-        if (storedData.date !== currentRealDate) {
-           storedData = { date: currentRealDate, kills: {} };
-           localStorage.setItem(key, JSON.stringify(storedData));
-           setTodayKills({}); 
-        } else {
-           setTodayKills(prev => JSON.stringify(prev) !== JSON.stringify(storedData.kills) ? storedData.kills : prev);
-        }
-      }, [currentTime, appUser, isSleeping]);
+        // 為了避免每秒不必要的重新渲染，做 JSON 比較
+        setMyKills(prev => JSON.stringify(prev) !== JSON.stringify(kills) ? kills : prev);
+        setTodayKills(prev => JSON.stringify(prev) !== JSON.stringify(tKills) ? tKills : prev);
+      }, [currentTime, appUser, isSleeping, rawKillData]);
 
       const recordKillAchievement = async (bossId, bossName) => {
         try {
+          const currentRealDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
           const killRef = doc(db, 'userKills', `${appUser.id}_${bossId}`);
+          
+          // 將「總次數」與「今日次數」以日期為標籤一起寫入 Firebase
           await setDoc(killRef, {
             userId: appUser.id,
             userName: appUser.username,
             bossId: bossId,
             bossName: bossName,
             count: increment(1),
+            [`dailyCounts.${currentRealDate}`]: increment(1),
             lastUpdated: Date.now()
           }, { merge: true });
 
-          const currentRealDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
-          const key = `wakuboss_today_kills_${appUser.id}`;
-          let storedData = JSON.parse(localStorage.getItem(key) || '{"date": "", "kills": {}}');
-          
-          if (storedData.date !== currentRealDate) {
-             storedData = { date: currentRealDate, kills: {} };
-          }
-          
-          storedData.kills[bossId] = (storedData.kills[bossId] || 0) + 1;
-          localStorage.setItem(key, JSON.stringify(storedData));
-          
-          setTodayKills(storedData.kills);
         } catch(e) {
           console.error("成就紀錄失敗", e);
         }
       };
-
-      useEffect(() => {
-        if (!appUser || isSleeping) return;
-        const q = query(collection(db, 'userKills'), where('userId', '==', appUser.id));
-        const unsub = onSnapshot(q, (snap) => {
-          const kills = {};
-          snap.forEach(d => { kills[d.data().bossId] = d.data().count; });
-          setMyKills(kills);
-        });
-        return () => unsub();
-      }, [appUser, isSleeping]);
 
       useEffect(() => {
         if (activeModalBossId) localStorage.setItem('wakuboss_active_modal', activeModalBossId);
