@@ -613,7 +613,9 @@
             bossId: bossId,
             bossName: bossName,
             count: increment(1),
-            [`dailyCounts.${currentRealDate}`]: increment(1),
+            dailyCounts: {
+              [currentRealDate]: increment(1)
+            },
             lastUpdated: Date.now()
           }, { merge: true });
 
